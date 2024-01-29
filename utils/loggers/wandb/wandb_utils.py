@@ -172,6 +172,7 @@ class WandbLogger:
             with all_logging_disabled():
                 try:
                     wandb.log(self.log_dict)
+                    print("wandb.log _> ", self.log_dict)
                 except BaseException as e:
                     LOGGER.info(
                         f"An error occurred in wandb logger. The training will proceed without interruption. More info\n{e}"
@@ -186,6 +187,7 @@ class WandbLogger:
             if self.log_dict:
                 with all_logging_disabled():
                     wandb.log(self.log_dict)
+                    print("wandb.log -> ", self.log_dict)
             wandb.run.finish()
             LOGGER.warning(DEPRECATION_WARNING)
 
