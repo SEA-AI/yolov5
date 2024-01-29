@@ -67,9 +67,13 @@ class WandbLogger:
         if self.wandb:
             self.wandb_run = wandb.run or wandb.init(
                 
+                resume="allow",
                 project="YOLOv5" if opt.project == "runs/train" else Path(opt.project).stem,
+                entity=opt.entity,
                 name=opt.name if opt.name != "exp" else None,
                 job_type=job_type,
+                id=run_id,
+                allow_val_change=True,
             )
 
         if self.wandb_run and self.job_type == "Training":
@@ -172,7 +176,6 @@ class WandbLogger:
             with all_logging_disabled():
                 try:
                     wandb.log(self.log_dict)
-                    print("wandb.log _> ", self.log_dict)
                 except BaseException as e:
                     LOGGER.info(
                         f"An error occurred in wandb logger. The training will proceed without interruption. More info\n{e}"
@@ -187,7 +190,6 @@ class WandbLogger:
             if self.log_dict:
                 with all_logging_disabled():
                     wandb.log(self.log_dict)
-                    print("wandb.log -> ", self.log_dict)
             wandb.run.finish()
             LOGGER.warning(DEPRECATION_WARNING)
 
