@@ -66,14 +66,7 @@ class WandbLogger:
         self.data_dict = None
         if self.wandb:
             self.wandb_run = wandb.run or wandb.init(
-                
-                resume="allow",
                 project="YOLOv5" if opt.project == "runs/train" else Path(opt.project).stem,
-                entity=opt.entity,
-                name=opt.name if opt.name != "exp" else None,
-                job_type=job_type,
-                id=run_id,
-                allow_val_change=True,
             )
 
         if self.wandb_run and self.job_type == "Training":
@@ -96,20 +89,20 @@ class WandbLogger:
         """
         self.log_dict, self.current_epoch = {}, 0
         self.bbox_interval = opt.bbox_interval
-        if isinstance(opt.resume, str):
-            model_dir, _ = self.download_model_artifact(opt)
-            if model_dir:
-                self.weights = Path(model_dir) / "last.pt"
-                config = self.wandb_run.config
-                opt.weights, opt.save_period, opt.batch_size, opt.bbox_interval, opt.epochs, opt.hyp, opt.imgsz = (
-                    str(self.weights),
-                    config.save_period,
-                    config.batch_size,
-                    config.bbox_interval,
-                    config.epochs,
-                    config.hyp,
-                    config.imgsz,
-                )
+        # if isinstance(opt.resume, str):
+        #     model_dir, _ = self.download_model_artifact(opt)
+        #     if model_dir:
+        #         self.weights = Path(model_dir) / "last.pt"
+        #         config = self.wandb_run.config
+        #         opt.weights, opt.save_period, opt.batch_size, opt.bbox_interval, opt.epochs, opt.hyp, opt.imgsz = (
+        #             str(self.weights),
+        #             config.save_period,
+        #             config.batch_size,
+        #             config.bbox_interval,
+        #             config.epochs,
+        #             config.hyp,
+        #             config.imgsz,
+        #         )
 
         if opt.bbox_interval == -1:
             self.bbox_interval = opt.bbox_interval = (opt.epochs // 10) if opt.epochs > 10 else 1
