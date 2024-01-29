@@ -66,14 +66,10 @@ class WandbLogger:
         self.data_dict = None
         if self.wandb:
             self.wandb_run = wandb.run or wandb.init(
-                config=opt,
-                resume="allow",
+                
                 project="YOLOv5" if opt.project == "runs/train" else Path(opt.project).stem,
-                entity=opt.entity,
                 name=opt.name if opt.name != "exp" else None,
                 job_type=job_type,
-                id=run_id,
-                allow_val_change=True,
             )
 
         if self.wandb_run and self.job_type == "Training":
