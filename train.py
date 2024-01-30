@@ -507,10 +507,10 @@ def train(hyp, opt, device, callbacks):  # hyp is path/to/hyp.yaml or hyp dictio
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--weights", type=str, default=ROOT / "data/yolov5n6_RGB_D2304-v1_9C.pt", help="initial weights path")
+    parser.add_argument("--weights", type=str, default="/launch/data/yolov5n6_RGB_D2304-v1_9C.pt", help="initial weights path")
     parser.add_argument("--cfg", type=str, default="", help="model.yaml path")
-    parser.add_argument("--data", type=str, default=ROOT / "datasets/network/dataset.yaml", help="dataset.yaml path")
-    parser.add_argument("--hyp", type=str, default=ROOT / "data/hyp.sea-ai.yaml", help="hyperparameters path")
+    parser.add_argument("--data", type=str, default="/launch/datasets/network/dataset.yaml", help="dataset.yaml path")
+    parser.add_argument("--hyp", type=str, default="/launch/data/hyp.sea-ai.yaml", help="hyperparameters path")
     parser.add_argument("--epochs", type=int, default=4, help="total training epochs")
     parser.add_argument("--batch-size", type=int, default=-1, help="total batch size for all GPUs, -1 for autobatch")
     parser.add_argument("--imgsz", "--img", "--img-size", type=int, default=1280, help="train, val image size (pixels)")
