@@ -64,10 +64,37 @@ class WandbLogger:
         self.val_table, self.result_table = None, None
         self.max_imgs_to_log = 16
         self.data_dict = None
+    
+        test_dict = {
+            'epochs': opt.epochs,
+        }
         if self.wandb:
+            test = wandb.Settings(save_code=False)
             self.wandb_run = wandb.run or wandb.init(
                 project="YOLOv5" if opt.project == "runs/train" else Path(opt.project).stem,
+                config=test_dict, settings=test
             )
+            
+            # try:
+            #     print("self.wandb_run->",self.wandb_run)
+            # except: 
+            #     print("self.wandb_run not found")
+            # try:
+            #     print("self.wandb_run.config->",self.wandb_run.config)
+            # except:
+            #     print("self.wandb_run.config not found")
+            # try:
+            #     print("self.wandb_run.launch_config->",self.wandb_run.launch_config)
+            # except:
+            #     print("self.wandb_run.launch_config not found")
+            # try:
+            #     print("self.wandb_run.settings->",self.wandb_run.settings)
+            # except:
+            #     print("self.wandb_run.settings not found")
+            try:
+                print("self.wandb_run.settings._args->", self.wandb_run.settings._args)
+            except:
+                print("self.wandb_run.settings._args not found")
 
         if self.wandb_run and self.job_type == "Training":
             if isinstance(opt.data, dict):
