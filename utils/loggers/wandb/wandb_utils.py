@@ -69,10 +69,9 @@ class WandbLogger:
             'epochs': opt.epochs,
         }
         if self.wandb:
-            test = wandb.Settings(save_code=False)
             self.wandb_run = wandb.run or wandb.init(
                 project="YOLOv5" if opt.project == "runs/train" else Path(opt.project).stem,
-                config=test_dict, settings=test
+                config=test_dict, save_code=False
             )
             
             # try:
