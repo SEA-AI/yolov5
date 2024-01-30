@@ -24,6 +24,7 @@ import time
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
+import wandb
 
 try:
     import comet_ml  # must be imported before torch (if installed)
@@ -834,4 +835,11 @@ def run(**kwargs):
 
 if __name__ == "__main__":
     opt = parse_opt()
+    wandb_config = wandb.config
+    for key, value in wandb_config.items():
+        try:
+            setattr(opt, key, value)
+        except AttributeError:
+            pass
+    
     main(opt)
