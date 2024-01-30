@@ -835,11 +835,5 @@ def run(**kwargs):
 
 if __name__ == "__main__":
     opt = parse_opt()
-    wandb_config = wandb.config
-    for key, value in wandb_config.items():
-        try:
-            setattr(opt, key, value)
-        except AttributeError:
-            pass
     
     main(opt)
