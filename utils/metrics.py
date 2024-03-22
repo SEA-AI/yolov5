@@ -272,6 +272,41 @@ def process_batch(detections, labels, iouv, pred_masks=None, gt_masks=None, over
     return torch.tensor(correct, dtype=torch.bool, device=iouv.device)
 
 
+def bbox_bep(box1, box2, xywh=True, eps=1e-7):
+    """
+    Calculates bottom edge proximity between two boxes
+    
+    Input shapes are box1(1,4) to box2(n,4)
+    
+    Implementation of bep2 from 
+        Are object detection assessment criteria ready for maritime computer vision?
+    """
+
+    # Get the coordinates of bounding boxes
+    if xywh:  # transform from xywh to xyxy
+        (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+        w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
+        b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
+        b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
+    else:  # x1, y1, x2, y2 = box1
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+        w1, h1 = b1_x2 - b1_x1, (b1_y2 - b1_y1).clamp(eps)
+        w2, h2 = b2_x2 - b2_x1, (b2_y2 - b2_y1).clamp(eps)
+
+    # Bottom edge distance (absolute value)
+    # xb = torch.abs(b2_x2 - b1_x1)
+    xb = torch.max(torch.min(b2_x2-b1_x1, b1_x2-b2_x1), torch.zeros((1)).to(b1_x1.device))
+    xa = w2 - xb
+    ybe = torch.abs(b2_y2 - b1_y2)
+    X2 = xb/(xb+xa)
+    Y2 = 1-ybe/h2
+
+    bep2 = X2*Y2
+
+    return bep2
+
+
 @threaded
 def plot_pr_curve(px, py, ap, save_dir=Path("pr_curve.png"), names=()):
     """Plots precision-recall curve, optionally per class, saving to `save_dir`; `px`, `py` are lists, `ap` is Nx2
