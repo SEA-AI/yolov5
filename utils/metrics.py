@@ -272,14 +272,11 @@ def process_batch(detections, labels, iouv, pred_masks=None, gt_masks=None, over
     return torch.tensor(correct, dtype=torch.bool, device=iouv.device)
 
 
-def bbox_bep(box1, box2, xywh=True, eps=1e-7):
+def bbox_bemd(box1, box2, xywh=True, eps=1e-7):
     """
-    Calculates bottom edge proximity between two boxes
+    Calculates bottom edge center Manhattan distance between two boxes, supporting xywh/xyxy formats.
     
     Input shapes are box1(1,4) to box2(n,4)
-    
-    Implementation of bep2 from 
-        Are object detection assessment criteria ready for maritime computer vision?
     """
 
     # Get the coordinates of bounding boxes
@@ -293,18 +290,16 @@ def bbox_bep(box1, box2, xywh=True, eps=1e-7):
         b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
         w1, h1 = b1_x2 - b1_x1, (b1_y2 - b1_y1).clamp(eps)
         w2, h2 = b2_x2 - b2_x1, (b2_y2 - b2_y1).clamp(eps)
+        x1 = (b1_x1 + b1_x2) / 2
+        x2 = (b2_x1 + b2_x2) / 2
 
     # Bottom edge distance (absolute value)
-    # xb = torch.abs(b2_x2 - b1_x1)
-    xb = torch.max(torch.min(b2_x2-b1_x1, b1_x2-b2_x1), torch.zeros((1)).to(b1_x1.device))
-    xa = w2 - xb
-    ybe = torch.abs(b2_y2 - b1_y2)
-    X2 = xb/(xb+xa)
-    Y2 = 1-ybe/h2
+    be_y = torch.abs(b2_y2 - b1_y2)
+    be_c = torch.abs(x2 - x1)
 
-    bep2 = X2*Y2
-
-    return bep2
+    bemd = be_y+be_c
+    
+    return bemd
 
 
 @threaded

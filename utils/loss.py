@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from ultralytics.utils.metrics import bbox_iou, smooth_bce
 
-from utils.metrics import bbox_bep
+from utils.metrics import bbox_bemd
 from utils.torch_utils import de_parallel
 
 
@@ -152,10 +152,9 @@ class ComputeLoss:
                 pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
                 iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(prediction, target)
-                bep = bbox_bep(pbox, tbox[i]).squeeze()  # bev (bev, bep)
-                lbox += (1.0 - iou).mean()  + (1.0 - bep).mean()  # iou loss + bep loss
-                lbox /= 2
-                
+                bemd = bbox_bemd(pbox, tbox[i]).squeeze()  # bev (bev, bep)
+                lbox += (1.0 - iou).mean()  + bemd.mean()  # iou loss + bep loss
+
                 # Objectness
                 iou = iou.detach().clamp(0).type(tobj.dtype)
                 if self.sort_obj_iou:
