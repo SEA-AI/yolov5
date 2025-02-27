@@ -237,6 +237,7 @@ def train(hyp, opt, device, callbacks):
     # Image size
     gs = max(int(model.stride.max()), 32)  # grid size (max stride)
     imgsz = check_img_size(opt.imgsz, gs, floor=gs * 2)  # verify imgsz is gs-multiple
+    min_area = opt.min_area 
 
     # Batch size
     if RANK == -1 and batch_size == -1:  # single-GPU only, estimate best batch size
@@ -287,6 +288,7 @@ def train(hyp, opt, device, callbacks):
     train_loader, dataset = create_dataloader(
         train_path,
         imgsz,
+        min_area,
         batch_size // WORLD_SIZE,
         gs,
         single_cls,
@@ -313,6 +315,7 @@ def train(hyp, opt, device, callbacks):
         val_loader = create_dataloader(
             val_path,
             imgsz,
+            min_area,
             batch_size // WORLD_SIZE * 2,
             gs,
             single_cls_val,
@@ -578,6 +581,7 @@ def parse_opt(known=False):
     parser.add_argument("--epochs", type=int, default=100, help="total training epochs")
     parser.add_argument("--batch-size", type=int, default=16, help="total batch size for all GPUs, -1 for autobatch")
     parser.add_argument("--imgsz", "--img", "--img-size", type=int, default=640, help="train, val image size (pixels)")
+    parser.add_argument("--min_area", type=int, default=0, help="minimum bounding box area in pixels")
     parser.add_argument("--rect", action="store_true", help="rectangular training")
     parser.add_argument("--resume", nargs="?", const=True, default=False, help="resume most recent training")
     parser.add_argument("--nosave", action="store_true", help="only save final checkpoint")

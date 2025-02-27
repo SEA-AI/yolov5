@@ -161,6 +161,7 @@ class SmartDistributedSampler(distributed.DistributedSampler):
 def create_dataloader(
     path,
     imgsz,
+    min_area,
     batch_size,
     stride,
     single_cls=False,
@@ -187,6 +188,7 @@ def create_dataloader(
         dataset = LoadImagesAndLabels(
             path,
             imgsz,
+            min_area,
             batch_size,
             augment=augment,  # augmentation
             hyp=hyp,  # hyperparameters
@@ -550,6 +552,7 @@ class LoadImagesAndLabels(Dataset):
         self,
         path,
         img_size=640,
+        min_area=0,
         batch_size=16,
         augment=False,
         hyp=None,
@@ -567,6 +570,7 @@ class LoadImagesAndLabels(Dataset):
     ):
         """Initializes the YOLOv5 dataset loader, handling images and their labels, caching, and preprocessing."""
         self.img_size = img_size
+        self.min_area = min_area
         self.augment = augment
         self.hyp = hyp
         self.image_weights = image_weights
@@ -624,6 +628,7 @@ class LoadImagesAndLabels(Dataset):
         assert nl > 0 or not augment, f"{prefix}All labels empty in {cache_path}, can not start training. {HELP_URL}"
         self.labels = list(labels)
         self.shapes = np.array(shapes)
+        self.filter_labels()
         self.im_files = list(cache.keys())  # update
         self.label_files = img2label_paths(cache.keys())  # update
 
@@ -1023,6 +1028,13 @@ class LoadImagesAndLabels(Dataset):
         )  # border to remove
 
         return img9, labels9
+
+    def filter_labels(self):
+
+        for i, image_labels in enumerate(self.labels):
+            shape = self.shapes[i]
+            areas = image_labels[:, 3]*image_labels[:, 4]*shape[0]*shape[1]*self.img_size**2/(max(shape)**2)
+            self.labels[i] = image_labels[areas > self.min_area]
 
     @staticmethod
     def collate_fn(batch):
