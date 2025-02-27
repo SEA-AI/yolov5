@@ -628,7 +628,8 @@ class LoadImagesAndLabels(Dataset):
         assert nl > 0 or not augment, f"{prefix}All labels empty in {cache_path}, can not start training. {HELP_URL}"
         self.labels = list(labels)
         self.shapes = np.array(shapes)
-        self.filter_labels()
+        if self.min_area > 0:
+            self.filter_labels()
         self.im_files = list(cache.keys())  # update
         self.label_files = img2label_paths(cache.keys())  # update
 
