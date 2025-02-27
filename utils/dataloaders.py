@@ -1030,7 +1030,7 @@ class LoadImagesAndLabels(Dataset):
         return img9, labels9
 
     def filter_labels(self):
-
+        """ Filter out labels that are too small."""
         for i, image_labels in enumerate(self.labels):
             shape = self.shapes[i]
             areas = image_labels[:, 3]*image_labels[:, 4]*shape[0]*shape[1]*self.img_size**2/(max(shape)**2)
