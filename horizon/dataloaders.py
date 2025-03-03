@@ -16,7 +16,57 @@ from torch.utils.data import DataLoader, Dataset
 
 import horizon.transforms as T
 
-
+def get_train_dataloader(
+    dataset: fo.Dataset,
+    imgsz: int,
+    batch_size: int = 16,
+    num_workers: int = 8,
+    shuffle: bool = True,
+    pin_memory: bool = False,
+    dataloader_kwargs: dict = None,
+    im_compression_prob: float = 0.9,
+):
+    dataset = HorizonDataset(
+        dataset=dataset,
+        rgb_transform=T.horizon_augment_rgb(imgsz, im_compression_prob),
+        ir16bit_transform=T.horizon_augment_ir16bit(imgsz, im_compression_prob),
+        target_transform=T.points_to_normalised_pitch_theta
+    )
+    
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=shuffle,
+        pin_memory=pin_memory,
+        **dataloader_kwargs if dataloader_kwargs is not None else {},
+    )
+    
+def get_val_dataloader(
+    dataset: fo.Dataset,
+    imgsz: int,
+    batch_size: int = 16,
+    num_workers: int = 8,
+    shuffle: bool = False,
+    pin_memory: bool = False,
+    dataloader_kwargs: dict = None,
+):
+    dataset = HorizonDataset(
+        dataset=dataset,
+        rgb_transform=T.horizon_base_rgb(imgsz),
+        ir16bit_transform=T.horizon_base_ir16bit(imgsz),
+        target_transform=T.points_to_normalised_pitch_theta
+    )
+    
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=shuffle,
+        pin_memory=pin_memory,
+        **dataloader_kwargs if dataloader_kwargs is not None else {},
+    )
+    
 def get_train_rgb_dataloader(
     dataset: fo.Dataset,
     imgsz: int,
@@ -168,9 +218,9 @@ class HorizonDataset(Dataset):
         self,
         dataset: fo.Dataset,
         field: str = "ground_truth_pl.polylines.points",
-        transform: callable = None,
+        rgb_transform: callable = None,
+        ir16bit_transform: callable = None,
         target_transform: callable = None,
-        replace_8bit_path: bool = False,
     ):
         """
         Args:
@@ -189,15 +239,17 @@ class HorizonDataset(Dataset):
         self.filepaths: List[str] = dataset.values("filepath")
         self.targets: np.ndarray = np.array(dataset.values(field)).squeeze()
 
-        if transform is not None:
-            assert callable(transform), "transform must be callable"
-        self.transform = transform
+        if rgb_transform is not None:
+            assert callable(rgb_transform), "rgb transform must be callable"
+        self.rgb_transform = rgb_transform
+
+        if ir16bit_transform is not None:
+            assert callable(ir16bit_transform), "ir16bit transform must be callable"
+        self.ir16bit_transform = ir16bit_transform
 
         if target_transform is not None:
             assert callable(target_transform), "target_transform must be callable"
         self.target_transform = target_transform
-
-        self.replace_8bit_path = replace_8bit_path
 
     def __len__(self):
         return len(self.filepaths)
@@ -206,12 +258,15 @@ class HorizonDataset(Dataset):
         fpath = self.filepaths[idx]
         target = self.targets[idx]
 
-        if self.replace_8bit_path:
+        if any(["Thermal" in fpath, "thermal" in fpath]):
+            transform = self.ir16bit_transform
             fpath = (
                 fpath.replace("8Bit", "16Bit")
                 .replace(".jpg", ".png")
                 .replace("jpeg", "png")
             )
+        else:
+            transform = self.rgb_transform
 
         # read image (np.ndarray)
         image = cv2.imread(fpath, cv2.IMREAD_UNCHANGED)
@@ -225,10 +280,10 @@ class HorizonDataset(Dataset):
         target[:, 0] *= image_w
         target[:, 1] *= image_h
 
-        if self.transform:
+        if transform:
             # albumentations does not like points in the border
             target = self.shift_points_in_border(target, image.shape[1], image.shape[0])
-            augmented = self.transform(image=image, keypoints=target)
+            augmented = transform(image=image, keypoints=target)
             image = augmented["image"]
             image_h, image_w = image.shape[1:]  # tensor has now (C,H,W)
             target = augmented["keypoints"]

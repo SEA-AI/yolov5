@@ -39,8 +39,10 @@ ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 from horizon.dataloaders import (  # noqa: E402
     get_train_ir16bit_dataloader,
     get_train_rgb_dataloader,
+    get_train_dataloader,
     get_val_ir16bit_dataloader,
     get_val_rgb_dataloader,
+    get_val_dataloader
 )
 from models.custom import HorizonModel  # noqa: E402
 from utils.autobatch import check_train_batch_size  # noqa: E402
@@ -60,42 +62,60 @@ def get_dataloaders(
     field: str = "ground_truth_pl.polylines.closed",
 ):
     # TODO: add tag check
-    if "RGB" in dataset_name:
-        train_dataloader = get_train_rgb_dataloader(
-            dataset=(
-                fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(train_tag)
-                # .take(5000, seed=51)
-            ),
-            imgsz=imgsz,
-            batch_size=batch_size if imgsz == 640 else 16,
-            im_compression_prob=im_compression_prob,
-        )
+    train_dataloader = get_train_dataloader(
+        dataset=(
+            fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(train_tag)
+            # .take(5000, seed=51)
+        ),
+        imgsz=imgsz,
+        batch_size=batch_size if imgsz == 640 else 16,
+        im_compression_prob=im_compression_prob,
+    )
 
-        val_dataloader = get_val_rgb_dataloader(
-            dataset=(
-                fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(val_tag)
-                # .take(5000, seed=51)
-            ),
-            imgsz=imgsz,
-            batch_size=batch_size if imgsz == 640 else 16,
-        )
-    else:
-        train_dataloader = get_train_ir16bit_dataloader(
-            dataset=(
-                fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(train_tag)
-                # .take(1000, seed=51)
-            ),
-            imgsz=imgsz,
-            im_compression_prob=im_compression_prob,
-        )
+    val_dataloader = get_val_dataloader(
+        dataset=(
+            fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(val_tag)
+            # .take(5000, seed=51)
+        ),
+        imgsz=imgsz,
+        batch_size=batch_size if imgsz == 640 else 16,
+    )
+    # if "RGB" in dataset_name:
+    #     train_dataloader = get_train_rgb_dataloader(
+    #         dataset=(
+    #             fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(train_tag)
+    #             # .take(5000, seed=51)
+    #         ),
+    #         imgsz=imgsz,
+    #         batch_size=batch_size if imgsz == 640 else 16,
+    #         im_compression_prob=im_compression_prob,
+    #     )
 
-        val_dataloader = get_val_ir16bit_dataloader(
-            dataset=(
-                fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(val_tag)
-                # .take(1000, seed=51)
-            ),
-            imgsz=imgsz,
-        )
+    #     val_dataloader = get_val_rgb_dataloader(
+    #         dataset=(
+    #             fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(val_tag)
+    #             # .take(5000, seed=51)
+    #         ),
+    #         imgsz=imgsz,
+    #         batch_size=batch_size if imgsz == 640 else 16,
+    #     )
+    # else:
+    #     train_dataloader = get_train_ir16bit_dataloader(
+    #         dataset=(
+    #             fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(train_tag)
+    #             # .take(1000, seed=51)
+    #         ),
+    #         imgsz=imgsz,
+    #         im_compression_prob=im_compression_prob,
+    #     )
+
+    #     val_dataloader = get_val_ir16bit_dataloader(
+    #         dataset=(
+    #             fo.load_dataset(dataset_name).match(F(field) == [False]).match_tags(val_tag)
+    #             # .take(1000, seed=51)
+    #         ),
+    #         imgsz=imgsz,
+    #     )
 
     return train_dataloader, val_dataloader
 
@@ -439,7 +459,7 @@ def run(
         }
 
         if epoch % 5 == 0:
-            log_dict["predictions"] = [wandb.Image(**img) for img in get_wb_images(model, val_dataloader, n=10)]
+            log_dict["predictions"] = [wandb.Image(**img) for img in get_wb_images(model, val_dataloader, n=5)]
 
         wandb.run.log(log_dict)
 
