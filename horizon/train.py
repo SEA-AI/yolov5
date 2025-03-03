@@ -37,11 +37,7 @@ if str(ROOT) not in sys.path:
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 from horizon.dataloaders import (  # noqa: E402
-    get_train_ir16bit_dataloader,
-    get_train_rgb_dataloader,
     get_train_dataloader,
-    get_val_ir16bit_dataloader,
-    get_val_rgb_dataloader,
     get_val_dataloader
 )
 from models.custom import HorizonModel  # noqa: E402
@@ -459,7 +455,7 @@ def run(
         }
 
         if epoch % 5 == 0:
-            log_dict["predictions"] = [wandb.Image(**img) for img in get_wb_images(model, val_dataloader, n=5)]
+            log_dict["predictions"] = [wandb.Image(**img) for img in get_wb_images(model, val_dataloader, n=10)]
 
         wandb.run.log(log_dict)
 
