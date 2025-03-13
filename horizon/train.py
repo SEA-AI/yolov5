@@ -10,7 +10,9 @@ Example:
 """
 
 import argparse
+import math
 import os
+import random
 import sys
 from copy import deepcopy
 from datetime import datetime
@@ -20,6 +22,7 @@ import cv2
 import fiftyone as fo
 import numpy as np
 import torch
+import torch.nn as nn
 import wandb
 from fiftyone import ViewField as F
 from torch.cuda import amp
@@ -36,10 +39,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
-from horizon.dataloaders import (  # noqa: E402
-    get_train_dataloader,
-    get_val_dataloader
-)
+from horizon.dataloaders import get_train_dataloader, get_val_dataloader  # noqa: E402
 from models.custom import HorizonModel  # noqa: E402
 from utils.autobatch import check_train_batch_size  # noqa: E402
 from utils.downloads import attempt_download  # noqa: E402
@@ -92,6 +92,7 @@ def update(
     ema: ModelEMA,
     epoch: int,
     epochs: int,
+    multi_scale: bool,
 ):
     """Update model weights via back-propagation."""
 
@@ -122,6 +123,17 @@ def update(
 
         # process targets
         pitch_i, theta_i = model.to_discrete(pitch=targets[..., 0], theta=targets[..., 1])
+
+        # Multi-scale
+        if multi_scale:
+            imgsz = model.imgsz
+            gs = max(int(model.stride.max()), 32)  # grid size (max stride)
+            sz = random.randrange(int(imgsz * 0.5), int(imgsz * 1.5) + gs) // gs * gs  # size
+            sf = sz / max(images.shape[2:])  # scale factor
+            if sf != 1:
+                ns = [math.ceil(x * sf / gs) * gs for x in images.shape[2:]]  # new shape (stretched to gs-multiple)
+                images = nn.functional.interpolate(images, size=ns, mode="bilinear", align_corners=False)
+
 
         # forward
         x_pitch, x_theta = model(images)
@@ -251,6 +263,7 @@ def run(
     im_compression_prob: float = 0.9,
     batch_size: int = -1,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    multi_scale: bool = False, # use multi-scale training
 ):
     """
     Train a horizon model.
@@ -342,6 +355,7 @@ def run(
             "device": device,
             "batch_size": batch_size,
             "im_compression_prob": im_compression_prob,
+            "multi_scale": multi_scale,
         },
     )
 
@@ -362,6 +376,7 @@ def run(
             ema,
             epoch,
             epochs,
+            multi_scale
         )
 
         scheduler.step()
@@ -523,6 +538,7 @@ def parse_args():
     parser.add_argument("--imgsz", type=int, default=640, help="train, val image size")
     parser.add_argument("--epochs", type=int, default=100, help="number of epochs")
     parser.add_argument("--dropout", type=float, default=0.25, help="dropout rate")
+
     parser.add_argument(
         "--im_compression_prob",
         type=float,
@@ -535,6 +551,8 @@ def parse_args():
         default="cuda" if torch.cuda.is_available() else "cpu",
         help="cuda device, i.e. 0 or 0,1,2,3 or cpu",
     )
+    parser.add_argument("--multi-scale", action="store_true", help="vary img-size +/- 50%%")
+
     return parser.parse_args()
 
 
