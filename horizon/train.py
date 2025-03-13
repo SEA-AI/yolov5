@@ -125,15 +125,22 @@ def update(
         pitch_i, theta_i = model.to_discrete(pitch=targets[..., 0], theta=targets[..., 1])
 
         # Multi-scale
+        LOGGER.info(f"Using multi-scale training: {multi_scale}")
+
         if multi_scale:
             imgsz = model.imgsz
+            LOGGER.info(f"Original image size: {imgsz}")
             gs = max(int(model.stride.max()), 32)  # grid size (max stride)
+            LOGGER.info(f"Grid size: {gs}")
             sz = random.randrange(int(imgsz * 0.5), int(imgsz * 1.5) + gs) // gs * gs  # size
+            LOGGER.info(f"New random image size: {sz}")
             sf = sz / max(images.shape[2:])  # scale factor
+            LOGGER.info(f"Scale factor: {sf}")
             if sf != 1:
                 ns = [math.ceil(x * sf / gs) * gs for x in images.shape[2:]]  # new shape (stretched to gs-multiple)
                 images = nn.functional.interpolate(images, size=ns, mode="bilinear", align_corners=False)
-
+                LOGGER.info(f"Resized image shape: {images.shape}")
+    
 
         # forward
         x_pitch, x_theta = model(images)
