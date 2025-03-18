@@ -62,7 +62,7 @@ def get_dataloaders(
             # .take(5000, seed=51)
         ),
         imgsz=imgsz,
-        batch_size=batch_size if imgsz == 640 else 16,
+        batch_size=batch_size,
         im_compression_prob=im_compression_prob,
     )
 
@@ -72,7 +72,7 @@ def get_dataloaders(
             # .take(5000, seed=51)
         ),
         imgsz=imgsz,
-        batch_size=batch_size if imgsz == 640 else 16,
+        batch_size=batch_size,
     )
 
     return train_dataloader, val_dataloader
