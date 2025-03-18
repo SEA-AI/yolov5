@@ -15,6 +15,7 @@ import sys
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from typing import Tuple
 
 import cv2
 import fiftyone as fo
@@ -36,10 +37,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
-from horizon.dataloaders import (  # noqa: E402
-    get_train_dataloader,
-    get_val_dataloader
-)
+from horizon.dataloaders import get_train_dataloader, get_val_dataloader  # noqa: E402
 from models.custom import HorizonModel  # noqa: E402
 from utils.autobatch import check_train_batch_size  # noqa: E402
 from utils.downloads import attempt_download  # noqa: E402
@@ -52,7 +50,7 @@ def get_dataloaders(
     dataset_name: str,
     train_tag: str,
     val_tag: str,
-    imgsz: int,
+    imgsz: Tuple[int, int],
     im_compression_prob: float,
     batch_size: int,
     field: str = "ground_truth_pl.polylines.closed",
@@ -245,7 +243,7 @@ def run(
     nc_theta: int = 500,  # number of theta classes
     pitch_weight: float = 1.0,  # pitch loss weight
     theta_weight: float = 1.0,  # theta loss weight
-    imgsz: int = 640,  # model input size (assumes squared input)
+    imgsz: Tuple[int, int]=(640, 640),  # model input size (height, width)
     epochs: int = 100,
     dropout: float = 0.25,  # dropout rate for classification heads
     im_compression_prob: float = 0.9,
@@ -264,7 +262,7 @@ def run(
         nc_theta (int): Number of theta classes.
         pitch_weight (float): Weight for pitch loss.
         theta_weight (float): Weight for theta loss.
-        imgsz (int): Model input size (assumes squared input).
+        imgsz Tuple[int, int]: Model input size (height, width).
         epochs (int): Number of training epochs.
         dropout (float): Dropout rate for classification heads.
         im_compression_prob (float): Probability for image compression augmentation.
@@ -520,7 +518,8 @@ def parse_args():
     parser.add_argument("--nc_theta", type=int, default=500, help="number of theta classes")
     parser.add_argument("--pitch_weight", type=float, default=1.0, help="pitch loss weight")
     parser.add_argument("--theta_weight", type=float, default=1.0, help="theta loss weight")
-    parser.add_argument("--imgsz", type=int, default=640, help="train, val image size")
+    parser.add_argument("--imgsz", type=int, nargs="*", default=(640, 640), help="train, val image size as height width (single value will be used for both height and width)"
+)
     parser.add_argument("--epochs", type=int, default=100, help="number of epochs")
     parser.add_argument("--dropout", type=float, default=0.25, help="dropout rate")
     parser.add_argument(
@@ -540,4 +539,8 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # If only one value is provided, set both width and height to that value
+    args.imgsz = [args.imgsz] * 2 if isinstance(args.imgsz, int) else args.imgsz
+
     run(**vars(args))

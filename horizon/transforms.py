@@ -9,17 +9,18 @@ Useful links:
 - https://albumentations.ai/docs/getting_started/transforms_and_targets/
 """
 
-from typing import List
-import numpy as np
-import cv2
+from typing import List, Tuple
+
 import albumentations as A
+import cv2
+import numpy as np
 from albumentations.core.transforms_interface import BasicTransform
 from albumentations.pytorch.transforms import ToTensorV2
 
 import utils.albumentations16 as A16
 import utils.albumextensions as Ax
-from utils.horizon import points_to_pitch_theta  # points_to_hough
 from utils.general import LOGGER, colorstr
+from utils.horizon import points_to_pitch_theta  # points_to_hough
 
 
 def log_transforms(transforms: List[BasicTransform], prefix: str) -> None:
@@ -29,7 +30,7 @@ def log_transforms(transforms: List[BasicTransform], prefix: str) -> None:
     )
 
 
-def geometric_augment(imgsz: int) -> List[BasicTransform]:
+def geometric_augment(imgsz: Tuple[int,int]) -> List[BasicTransform]:
     """
     Geometric transforms for augmentation.
     """
@@ -38,7 +39,7 @@ def geometric_augment(imgsz: int) -> List[BasicTransform]:
         Ax.ResizeIfNeeded(max_size=imgsz),
         A.HorizontalFlip(p=0.5),
         A.PadIfNeeded(
-            min_height=imgsz, min_width=imgsz, border_mode=cv2.BORDER_CONSTANT, value=0
+            min_height=imgsz[0], min_width=imgsz[1], border_mode=cv2.BORDER_CONSTANT, value=0
         ),
         A.Affine(
             p=0.75,
@@ -55,7 +56,7 @@ def geometric_augment(imgsz: int) -> List[BasicTransform]:
 
 
 def horizon_augment_rgb(
-    imgsz: int,
+    imgsz: Tuple[int,int],
     im_compression_prob: float,
     prefix=colorstr("albumentations rgb:"),
 ) -> A.Compose:
@@ -63,7 +64,7 @@ def horizon_augment_rgb(
     Augmentations for RGB images.
 
     Args:
-        imgsz (int): image size
+        imgsz (Tuple[int,int]): image size (height, width)
         im_compression_prob (float): Image compression propability
 
     """
@@ -97,20 +98,20 @@ def horizon_augment_rgb(
     )
 
 
-def horizon_base_rgb(imgsz: int) -> A.Compose:
+def horizon_base_rgb(imgsz: Tuple[int,int]) -> A.Compose:
     """
     No augmentation, just resize and normalize.
 
     Args:
-        imgsz (int): image size
+        imgsz  (Tuple[int,int]): image size (height, width)
     """
     return A.Compose(
         [
             # geometric transforms
             Ax.ResizeIfNeeded(max_size=imgsz),
             A.PadIfNeeded(
-                min_height=imgsz,
-                min_width=imgsz,
+                min_height=imgsz[0],
+                min_width=imgsz[1],
                 border_mode=cv2.BORDER_CONSTANT,
                 value=0,
             ),  # letterbox
@@ -123,13 +124,13 @@ def horizon_base_rgb(imgsz: int) -> A.Compose:
 
 
 def horizon_augment_ir16bit(
-    imgsz: int, im_compression_prob: float, prefix=colorstr("albumentations ir16bit:")
+    imgsz: Tuple[int,int], im_compression_prob: float, prefix=colorstr("albumentations ir16bit:")
 ) -> A.Compose:
     """
     Augmentations for 16-bit IR images.
 
     Args:
-        imgsz (int): image size
+        imgsz (Tuple[int,int]): image size (height, width)
         im_compression_prob (float): Image compression propability
     """
 
@@ -154,7 +155,7 @@ def horizon_augment_ir16bit(
 
 
 def horizon_base_ir16bit(
-    imgsz: int,
+    imgsz: Tuple[int,int],
     lower_limit: float = 15000 / 65535,
     upper_limit: float = 28000 / 65535,
     clahe: bool = True,
@@ -164,7 +165,7 @@ def horizon_base_ir16bit(
     No augmentation, just resize and normalize.
 
     Args:
-        imgsz (int): image size
+        imgsz (Tuple[int,int]): image size (height, width)
         lower_limit (float): lower limit for clipping
         upper_limit (float): upper limit for clipping
         clahe (bool): apply CLAHE
@@ -185,8 +186,8 @@ def horizon_base_ir16bit(
             # geometric transforms
             Ax.ResizeIfNeeded(max_size=imgsz),
             A.PadIfNeeded(
-                min_height=imgsz,
-                min_width=imgsz,
+                min_height=imgsz[0],
+                min_width=imgsz[1],
                 border_mode=cv2.BORDER_CONSTANT,
                 value=0,
             ),  # letterbox
