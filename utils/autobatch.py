@@ -20,19 +20,6 @@ def check_train_batch_size(model, imgsz=[640, 640], amp=True):
     with torch.cuda.amp.autocast(amp):
         return autobatch(deepcopy(model).train(), imgsz)  # compute optimal batch size
     
-def print_available_devices():
-    # Check if CUDA is available
-    if torch.cuda.is_available():
-        # Print the number of available GPUs
-        print(f"Number of GPUs available: {torch.cuda.device_count()}")
-        
-        # Loop through all available devices and print their properties
-        print(f"Current device: {torch.cuda.current_device()}")
-        for device_id in range(torch.cuda.device_count()):
-            print(f"\nDevice {device_id}:")
-            print(f"  Name: {torch.cuda.get_device_name(device_id)}")
-    else:
-        print("CUDA is not available. No GPU found.")
 
 def autobatch(model, imgsz=[640, 640], fraction=0.8, batch_size=16):
     """Estimates optimal YOLOv5 batch size using `fraction` of CUDA memory."""
@@ -56,7 +43,6 @@ def autobatch(model, imgsz=[640, 640], fraction=0.8, batch_size=16):
     # Inspect CUDA memory
     gb = 1 << 30  # bytes to GiB (1024 ** 3)
     d = str(device).upper()  # 'CUDA:0'
-    print_available_devices()    
     properties = torch.cuda.get_device_properties(device)  # device properties
     t = properties.total_memory / gb  # GiB total
     r = torch.cuda.memory_reserved(device) / gb  # GiB reserved
@@ -72,13 +58,10 @@ def autobatch(model, imgsz=[640, 640], fraction=0.8, batch_size=16):
     except Exception as e:
         LOGGER.warning(f"{prefix}{e}")
 
-    # Check results
-    print(f"Results: {results}")  # debug
 
     # Fit a solution
     y = [x[2] for x in results if x]  # memory [2]
     p = np.polyfit(batch_sizes[: len(y)], y, deg=1)  # first degree polynomial fit
-    print(f"{prefix}Batch sizes {batch_sizes[: len(y)]} -> {y} -> {p}")  # debug
     b = int((f * fraction - p[1]) / p[0])  # y intercept (optimal batch size)
     if None in results:  # some sizes failed
         i = results.index(None)  # first fail index

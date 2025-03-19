@@ -170,7 +170,6 @@ def profile(input, ops, n=10, device=None):
     if not isinstance(device, torch.device):
         device = select_device(device)
     
-    print(f"👩‍💻 Using device: {device}")
     print(
         f"{'Params':>12s}{'GFLOPs':>12s}{'GPU_mem (GB)':>14s}{'forward (ms)':>14s}{'backward (ms)':>14s}"
         f"{'input':>24s}{'output':>24s}"
