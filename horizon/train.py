@@ -250,7 +250,8 @@ def _setup_device(device_spec):
         device = "cpu"
         
     # Set environment variable once at the end
-    os.environ["CUDA_VISIBLE_DEVICES"] = "" if device == "cpu" else device
+    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "" if device == "cpu" else str(device)
     print(f"CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
     
     # Return either "cpu" or "cuda:X" format
