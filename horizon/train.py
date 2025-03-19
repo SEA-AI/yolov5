@@ -274,7 +274,7 @@ def run(
     """
 
     # ensure that imgsz is a tuple (height, width)
-    imgsz = tuple([imgsz] * 2) if isinstance(imgsz, int) else imgsz
+    imgsz = (imgsz, imgsz) if isinstance(imgsz, int) else imgsz
 
     # create dir to store checkpoints
     ckpt_dir = ROOT / "runs" / "horizon" / "train" / dataset_name
