@@ -243,7 +243,7 @@ def run(
     nc_theta: int = 500,  # number of theta classes
     pitch_weight: float = 1.0,  # pitch loss weight
     theta_weight: float = 1.0,  # theta loss weight
-    imgsz: Tuple[int, int]=(640, 640),  # model input size (height, width)
+    imgsz: int | Tuple[int, int] = 640,  # model input size (height, width)
     epochs: int = 100,
     dropout: float = 0.25,  # dropout rate for classification heads
     im_compression_prob: float = 0.9,
@@ -262,7 +262,7 @@ def run(
         nc_theta (int): Number of theta classes.
         pitch_weight (float): Weight for pitch loss.
         theta_weight (float): Weight for theta loss.
-        imgsz Tuple[int, int]: Model input size (height, width).
+        imgsz int | Tuple[int, int]: Model input size (height, width) or single value for square input.
         epochs (int): Number of training epochs.
         dropout (float): Dropout rate for classification heads.
         im_compression_prob (float): Probability for image compression augmentation.
@@ -272,6 +272,10 @@ def run(
     Returns:
         None
     """
+
+    # ensure that imgsz is a tuple (height, width)
+    imgsz = tuple([imgsz] * 2) if isinstance(imgsz, int) else imgsz
+
     # create dir to store checkpoints
     ckpt_dir = ROOT / "runs" / "horizon" / "train" / dataset_name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -518,8 +522,7 @@ def parse_args():
     parser.add_argument("--nc_theta", type=int, default=500, help="number of theta classes")
     parser.add_argument("--pitch_weight", type=float, default=1.0, help="pitch loss weight")
     parser.add_argument("--theta_weight", type=float, default=1.0, help="theta loss weight")
-    parser.add_argument("--imgsz", type=int, nargs="*", default=(640, 640), help="train, val image size as height width (single value will be used for both height and width)"
-)
+    parser.add_argument("--imgsz", type=int, nargs="*", default=640, help="train, val image size as height width (single value will be used for both height and width)")
     parser.add_argument("--epochs", type=int, default=100, help="number of epochs")
     parser.add_argument("--dropout", type=float, default=0.25, help="dropout rate")
     parser.add_argument(
@@ -539,8 +542,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-
-    # If only one value is provided, set both width and height to that value
-    args.imgsz = [args.imgsz] * 2 if isinstance(args.imgsz, int) else args.imgsz
 
     run(**vars(args))
