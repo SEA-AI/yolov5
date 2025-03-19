@@ -46,7 +46,7 @@ class HorizonModel(BaseModel):
 
         self.nc_pitch = nc_pitch
         self.nc_theta = nc_theta
-        self.device = select_device(device)
+        self.device = device# select_device(device)
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
@@ -61,8 +61,7 @@ class HorizonModel(BaseModel):
             self.cutoff = _find_cutoff(model) if cutoff is None else cutoff
             self._from_detection_model(model, self.cutoff)  # inplace modification
 
-        self.model = model.model
-        self.model.to(self.device)
+      
         self.model.half() if fp16 else self.model.float()
         self.stride = stride
         self.save = model.save
