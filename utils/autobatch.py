@@ -27,6 +27,7 @@ def print_available_devices():
         print(f"Number of GPUs available: {torch.cuda.device_count()}")
         
         # Loop through all available devices and print their properties
+        print(f"Current device: {torch.cuda.current_device()}")
         for device_id in range(torch.cuda.device_count()):
             print(f"\nDevice {device_id}:")
             print(f"  Name: {torch.cuda.get_device_name(device_id)}")
@@ -56,10 +57,10 @@ def autobatch(model, imgsz=[640, 640], fraction=0.8, batch_size=16):
     gb = 1 << 30  # bytes to GiB (1024 ** 3)
     d = str(device).upper()  # 'CUDA:0'
     print_available_devices()    
-    properties = torch.cuda.get_device_properties(device)  # device properties
+    properties = torch.cuda.get_device_properties()  # device properties
     t = properties.total_memory / gb  # GiB total
-    r = torch.cuda.memory_reserved(device) / gb  # GiB reserved
-    a = torch.cuda.memory_allocated(device) / gb  # GiB allocated
+    r = torch.cuda.memory_reserved() / gb  # GiB reserved
+    a = torch.cuda.memory_allocated() / gb  # GiB allocated
     f = t - (r + a)  # GiB free
     LOGGER.info(f"{prefix}{d} ({properties.name}) {t:.2f}G total, {r:.2f}G reserved, {a:.2f}G allocated, {f:.2f}G free")
 
