@@ -144,8 +144,7 @@ def select_device(device="", batch_size=0, newline=True):
 
     if not newline:
         s = s.rstrip()
-        
-    print(f"💻 Running on device: {arg}.")
+
     LOGGER.info(s)
     return torch.device(arg)
 

@@ -47,7 +47,6 @@ class HorizonModel(BaseModel):
         self.nc_pitch = nc_pitch
         self.nc_theta = nc_theta
         self.device = select_device(device)
-        print(f"Using device: {self.device}")
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):

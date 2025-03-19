@@ -117,7 +117,6 @@ def update(
     for i, data in pbar:
         images, targets = data
         images, targets = images.to(model.device), targets.to(model.device)
-        print("using device", model.device)
 
         # process targets
         pitch_i, theta_i = model.to_discrete(pitch=targets[..., 0], theta=targets[..., 1])
