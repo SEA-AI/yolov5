@@ -60,7 +60,9 @@ class HorizonModel(BaseModel):
             LOGGER.warning("WARNING ⚠️ converting YOLOv5 DetectionModel to HorizonModel")
             self.cutoff = _find_cutoff(model) if cutoff is None else cutoff
             self._from_detection_model(model, self.cutoff)  # inplace modification
-
+            
+        self.model = model.model
+        self.model.to(self.device)
       
         self.model.half() if fp16 else self.model.float()
         self.stride = stride
