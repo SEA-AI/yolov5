@@ -19,7 +19,19 @@ def check_train_batch_size(model, imgsz=[640, 640], amp=True):
 
     with torch.cuda.amp.autocast(amp):
         return autobatch(deepcopy(model).train(), imgsz)  # compute optimal batch size
-
+    
+def print_available_devices():
+    # Check if CUDA is available
+    if torch.cuda.is_available():
+        # Print the number of available GPUs
+        print(f"Number of GPUs available: {torch.cuda.device_count()}")
+        
+        # Loop through all available devices and print their properties
+        for device_id in range(torch.cuda.device_count()):
+            print(f"\nDevice {device_id}:")
+            print(f"  Name: {torch.cuda.get_device_name(device_id)}")
+    else:
+        print("CUDA is not available. No GPU found.")
 
 def autobatch(model, imgsz=[640, 640], fraction=0.8, batch_size=16):
     """Estimates optimal YOLOv5 batch size using `fraction` of CUDA memory."""
@@ -43,8 +55,7 @@ def autobatch(model, imgsz=[640, 640], fraction=0.8, batch_size=16):
     # Inspect CUDA memory
     gb = 1 << 30  # bytes to GiB (1024 ** 3)
     d = str(device).upper()  # 'CUDA:0'
-    print(f"device in autobatch: {d}")
-    properties = torch.cuda.get_device_properties(1)  # device properties
+    print_available_devices()   
     properties = torch.cuda.get_device_properties(device)  # device properties
     t = properties.total_memory / gb  # GiB total
     r = torch.cuda.memory_reserved(device) / gb  # GiB reserved
