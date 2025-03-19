@@ -67,7 +67,7 @@ def autobatch(model, imgsz=[640, 640], fraction=0.8, batch_size=16):
     # Profile batch sizes
     batch_sizes = [1, 2, 4, 8, 16]
     try:
-        img = [torch.empty(b, 3, imgsz[0], imgsz[1]) for b in batch_sizes]
+        img = [torch.empty(b, 3, imgsz[1], imgsz[0]) for b in batch_sizes]
         results = profile(img, model, n=3, device=device)
     except Exception as e:
         LOGGER.warning(f"{prefix}{e}")
