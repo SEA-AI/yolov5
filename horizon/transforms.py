@@ -36,7 +36,7 @@ def geometric_augment(imgsz: Tuple[int,int]) -> List[BasicTransform]:
     """
     return [
         A.RandomCropFromBorders(p=0.1),
-        Ax.ResizeIfNeeded(max_size=max(imgsz)),
+        Ax.ResizeIfNeeded(max_size=min(imgsz)),
         A.HorizontalFlip(p=0.5),
         A.PadIfNeeded(
             min_height=imgsz[0], min_width=imgsz[1], border_mode=cv2.BORDER_CONSTANT, value=0
@@ -108,7 +108,7 @@ def horizon_base_rgb(imgsz: Tuple[int,int]) -> A.Compose:
     return A.Compose(
         [
             # geometric transforms
-            Ax.ResizeIfNeeded(max_size=max(imgsz)),
+            Ax.ResizeIfNeeded(max_size=min(imgsz)),
             A.PadIfNeeded(
                 min_height=imgsz[0],
                 min_width=imgsz[1],
@@ -184,7 +184,7 @@ def horizon_base_ir16bit(
             A.UnsharpMask(p=1.0 if unsharp_mask else 0.0, threshold=5),
             A.ToRGB(p=1.0),
             # geometric transforms
-            Ax.ResizeIfNeeded(max_size=max(imgsz)),
+            Ax.ResizeIfNeeded(max_size=min(imgsz)),
             A.PadIfNeeded(
                 min_height=imgsz[0],
                 min_width=imgsz[1],
