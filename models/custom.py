@@ -46,7 +46,8 @@ class HorizonModel(BaseModel):
 
         self.nc_pitch = nc_pitch
         self.nc_theta = nc_theta
-        self.device = torch.device(device)
+        self.device = select_device(device)
+        print(f"Using device: {self.device}")
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
@@ -60,7 +61,7 @@ class HorizonModel(BaseModel):
             LOGGER.warning("WARNING ⚠️ converting YOLOv5 DetectionModel to HorizonModel")
             self.cutoff = _find_cutoff(model) if cutoff is None else cutoff
             self._from_detection_model(model, self.cutoff)  # inplace modification
-            
+
         self.model = model.model
         self.model.to(self.device)
       
