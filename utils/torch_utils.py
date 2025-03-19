@@ -120,7 +120,9 @@ def select_device(device="", batch_size=0, newline=True):
     if cpu or mps:
         os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # force torch.cuda.is_available() = False
     elif device:  # non-cpu device requested
-        os.environ["CUDA_VISIBLE_DEVICES"] = device  # set environment variable - must be before assert is_available()
+        # Generate comma-separated list of GPU indices (0 to gpu_index)
+        visible_gpus = ",".join(str(i) for i in range(int(device) + 1))
+        os.environ["CUDA_VISIBLE_DEVICES"] = visible_gpus  # set environment variable - must be before assert is_available()
         assert torch.cuda.is_available() and torch.cuda.device_count() >= len(device.replace(",", "")), (
             f"Invalid CUDA '--device {device}' requested, use '--device cpu' or pass valid CUDA device(s)"
         )
@@ -167,6 +169,7 @@ def profile(input, ops, n=10, device=None):
     results = []
     if not isinstance(device, torch.device):
         device = select_device(device)
+    
     print(
         f"{'Params':>12s}{'GFLOPs':>12s}{'GPU_mem (GB)':>14s}{'forward (ms)':>14s}{'backward (ms)':>14s}"
         f"{'input':>24s}{'output':>24s}"
@@ -197,7 +200,7 @@ def profile(input, ops, n=10, device=None):
                         t[2] = float("nan")
                     tf += (t[1] - t[0]) * 1000 / n  # ms per op forward
                     tb += (t[2] - t[1]) * 1000 / n  # ms per op backward
-                mem = torch.cuda.memory_reserved() / 1e9 if torch.cuda.is_available() else 0  # (GB)
+                mem = torch.cuda.memory_reserved(device) / 1e9 if torch.cuda.is_available() else 0  # (GB)
                 s_in, s_out = (tuple(x.shape) if isinstance(x, torch.Tensor) else "list" for x in (x, y))  # shapes
                 p = sum(x.numel() for x in m.parameters()) if isinstance(m, nn.Module) else 0  # parameters
                 print(f"{p:12}{flops:12.4g}{mem:>14.3f}{tf:14.4g}{tb:14.4g}{str(s_in):>24s}{str(s_out):>24s}")
