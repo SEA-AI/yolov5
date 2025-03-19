@@ -234,30 +234,6 @@ def evaluate(
 
     return v_loss, v_ploss, v_tloss, mse_pitch, mse_theta
 
-def _log_device_info(device):
-    print("Device Info:", device)
-    print("CUDA Available:", torch.cuda.is_available())
-    print("GPU Count:", torch.cuda.device_count())
-
-    for i in range(torch.cuda.device_count()):
-        print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
-
-    print(f"CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
-
-
-def _setup_device(device_spec):
-    """Configure CUDA device settings and return normalized device string."""
-    if device_spec == "cuda":
-        device = str(torch.cuda.current_device())
-    elif isinstance(device_spec, int):
-        device = device_spec
-    else:
-        device = "cpu"
-        
-       
-    # Return either "cpu" or "cuda:X" format
-    return "cpu" if device == "cpu" else f"cuda:{device}"
-
 
 def run(
     dataset_name: str,  # fiftyone dataset name
@@ -297,11 +273,6 @@ def run(
     Returns:
         None
     """
-
-    # configure device
-    device = _setup_device(device)
-
-    _log_device_info(device)
 
     # ensure that imgsz is a tuple (height, width)
     imgsz = tuple([imgsz] * 2) if isinstance(imgsz, int) else imgsz
