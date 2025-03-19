@@ -134,7 +134,7 @@ def select_device(device="", batch_size=0, newline=True):
         for i, d in enumerate(devices):
             p = torch.cuda.get_device_properties(i)
             s += f"{'' if i == 0 else space}CUDA:{d} ({p.name}, {p.total_memory / (1 << 20):.0f}MiB)\n"  # bytes to MB
-        arg = "cuda:0"
+        arg = f"cuda:{device}"  # default CUDA device
     elif mps and getattr(torch, "has_mps", False) and torch.backends.mps.is_available():  # prefer MPS if available
         s += "MPS\n"
         arg = "mps"
@@ -144,6 +144,7 @@ def select_device(device="", batch_size=0, newline=True):
 
     if not newline:
         s = s.rstrip()
+
     LOGGER.info(s)
     return torch.device(arg)
 
