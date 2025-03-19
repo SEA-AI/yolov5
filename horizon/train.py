@@ -244,13 +244,14 @@ def _setup_device(device_spec):
     """Configure CUDA device settings and return normalized device string."""
     if device_spec == "cuda":
         device = str(torch.cuda.current_device())
-    elif device_spec.isdigit():
+    elif isinstance(device_spec, int):
         device = device_spec
     else:
         device = "cpu"
         
     # Set environment variable once at the end
     os.environ["CUDA_VISIBLE_DEVICES"] = "" if device == "cpu" else device
+    print(f"CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
     
     # Return either "cpu" or "cuda:X" format
     return "cpu" if device == "cpu" else f"cuda:{device}"
