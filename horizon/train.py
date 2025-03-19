@@ -240,6 +240,9 @@ def _log_device_info():
     for i in range(torch.cuda.device_count()):
         print(f"GPU {i}: {torch.cuda.get_device_name(i)}")
 
+    print(f"CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
+
+
 def _setup_device(device_spec):
     """Configure CUDA device settings and return normalized device string."""
     if device_spec == "cuda":
@@ -249,13 +252,9 @@ def _setup_device(device_spec):
     else:
         device = "cpu"
         
-    # Set environment variable once at the end
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "" if device == "cpu" else str(device)
-    print(f"CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
-    
+       
     # Return either "cpu" or "cuda:X" format
-    return "cpu" if device == "cpu" else f"cuda:{device}"
+    return "cpu" if device == "cpu" else str(device)
 
 
 def run(
