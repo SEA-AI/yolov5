@@ -10,7 +10,9 @@ Example:
 """
 
 import argparse
+import math
 import os
+import random
 import sys
 from copy import deepcopy
 from datetime import datetime
@@ -21,6 +23,7 @@ import cv2
 import fiftyone as fo
 import numpy as np
 import torch
+import torch.nn as nn
 import wandb
 from fiftyone import ViewField as F
 from torch.cuda import amp
@@ -90,6 +93,7 @@ def update(
     ema: ModelEMA,
     epoch: int,
     epochs: int,
+    multi_scale: bool,
 ):
     """Update model weights via back-propagation."""
 
@@ -120,6 +124,17 @@ def update(
 
         # process targets
         pitch_i, theta_i = model.to_discrete(pitch=targets[..., 0], theta=targets[..., 1])
+
+        # Multi-scale
+        if multi_scale:
+            imgsz = model.imgsz
+            gs = max(int(model.stride.max()), 32)  # grid size (max stride)
+            sz = random.randrange(int(imgsz * 0.5), int(imgsz) + gs) // gs * gs  # size
+            sf = sz / max(images.shape[2:])  # scale factor
+            if sf != 1:
+                ns = [math.ceil(x * sf / gs) * gs for x in images.shape[2:]]  # new shape (stretched to gs-multiple)
+                images = nn.functional.interpolate(images, size=ns, mode="bilinear", align_corners=False)
+
 
         # forward
         x_pitch, x_theta = model(images)
@@ -249,6 +264,7 @@ def run(
     im_compression_prob: float = 0.9,
     batch_size: int = -1,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    multi_scale: bool = False, # use multi-scale training
 ):
     """
     Train a horizon model.
@@ -344,6 +360,7 @@ def run(
             "device": device,
             "batch_size": batch_size,
             "im_compression_prob": im_compression_prob,
+            "multi_scale": multi_scale,
         },
     )
 
@@ -364,6 +381,7 @@ def run(
             ema,
             epoch,
             epochs,
+            multi_scale
         )
 
         scheduler.step()
@@ -525,6 +543,7 @@ def parse_args():
     parser.add_argument("--imgsz", type=int, nargs="*", default=640, help="train, val image size as height width (single value will be used for both height and width)")
     parser.add_argument("--epochs", type=int, default=100, help="number of epochs")
     parser.add_argument("--dropout", type=float, default=0.25, help="dropout rate")
+
     parser.add_argument(
         "--im_compression_prob",
         type=float,
@@ -537,6 +556,8 @@ def parse_args():
         default="cuda" if torch.cuda.is_available() else "cpu",
         help="cuda device, i.e. 0 or 0,1,2,3 or cpu",
     )
+    parser.add_argument("--multi-scale", action="store_true", help="vary img-size +/- 50%%")
+
     return parser.parse_args()
 
 
