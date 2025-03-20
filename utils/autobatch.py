@@ -10,24 +10,22 @@ from utils.general import LOGGER, colorstr
 from utils.torch_utils import profile
 
 
-def check_train_batch_size(model, imgsz=[640, 640], amp=True):
+def check_train_batch_size(model, imgsz=640, amp=True):
     """Checks and computes optimal training batch size for YOLOv5 model, given image size and AMP setting."""
-
-    # check if imgsize is a single number and convert it to tuple otherwise
-    imgsz = (imgsz, imgsz) if isinstance(imgsz, int) else imgsz
-
-
     with torch.cuda.amp.autocast(amp):
         return autobatch(deepcopy(model).train(), imgsz)  # compute optimal batch size
     
 
-def autobatch(model, imgsz=[640, 640], fraction=0.8, batch_size=16):
+def autobatch(model, imgsz=640, fraction=0.8, batch_size=16):
     """Estimates optimal YOLOv5 batch size using `fraction` of CUDA memory."""
     # Usage:
     #     import torch
     #     from utils.autobatch import autobatch
     #     model = torch.hub.load('ultralytics/yolov5', 'yolov5s', autoshape=False)
     #     print(autobatch(model))
+
+    # Change imgsz to tuple if it is a single number
+    imgsz = (imgsz, imgsz) if isinstance(imgsz, int) else imgsz
 
     # Check device
     prefix = colorstr("AutoBatch: ")
