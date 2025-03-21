@@ -36,7 +36,7 @@ def geometric_augment(imgsz: Tuple[int,int]) -> List[BasicTransform]:
     """
     return [
         A.RandomCropFromBorders(p=0.1),
-        Ax.ResizeIfNeeded(max_size=min(imgsz)),
+        Ax.ResizeIfNeeded(max_size=max(imgsz)),
         A.HorizontalFlip(p=0.5),
         A.PadIfNeeded(
             min_height=imgsz[0], min_width=imgsz[1], border_mode=cv2.BORDER_CONSTANT, value=0
