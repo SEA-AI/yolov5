@@ -57,6 +57,7 @@ def get_dataloaders(
     im_compression_prob: float,
     batch_size: int,
     field: str = "ground_truth_pl.polylines.closed",
+    num_workers: int = 8,
 ):
     # TODO: add tag check
     train_dataloader = get_train_dataloader(
@@ -67,6 +68,7 @@ def get_dataloaders(
         imgsz=imgsz,
         batch_size=batch_size,
         im_compression_prob=im_compression_prob,
+        num_workers=num_workers,
     )
 
     val_dataloader = get_val_dataloader(
@@ -76,6 +78,7 @@ def get_dataloaders(
         ),
         imgsz=imgsz,
         batch_size=batch_size,
+        num_workers=num_workers,
     )
 
     return train_dataloader, val_dataloader

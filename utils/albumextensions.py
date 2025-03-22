@@ -24,7 +24,7 @@ class MaxSizeHWInitSchema(BaseTransformInitSchema):
             return None
         result = v if isinstance(v, (list, tuple)) else [v]
         for value in result:
-            if not value >= 1:
+            if value < 1:
                 raise ValueError(f"{info.field_name} must be bigger or equal to 1.")
         return cast(Union[int, List[int], None], result)
 
