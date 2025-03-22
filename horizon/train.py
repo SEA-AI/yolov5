@@ -486,14 +486,14 @@ def get_wb_images(model: HorizonModel, dataloader: DataLoader, n=10):
 
         gt_points = pitch_theta_to_points(targets[0], targets[1], input_hw=images.shape[-2:], orig_hw=im.shape[:2])
         gt_points = np.array(gt_points).astype(np.int32)
-        gt_mask = np.zeros(im.shape, dtype=np.uint8)  # 0-->background, 1-->horizon
+        gt_mask = np.zeros(im.shape[:2], dtype=np.uint8)  # 0-->background, 1-->horizon
         cv2.line(gt_mask, gt_points[0], gt_points[1], color=1, thickness=4)
 
         y_points = pitch_theta_to_points(
             y_pitch.item(),
             y_theta.item(),
-            input_hw=images.shape[-2:],
-            orig_hw=im.shape[:2],
+            input_hw=images.shape[-2:],  # B, C, H, W
+            orig_hw=im.shape[:2],  # H, W, C
         )
         y_points = np.array(y_points).astype(np.int32)
         y_mask = np.zeros(im.shape, dtype=np.uint8)  # 0-->background, 1-->horizon
