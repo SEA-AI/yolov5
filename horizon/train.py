@@ -496,7 +496,7 @@ def get_wb_images(model: HorizonModel, dataloader: DataLoader, n=10):
             orig_hw=im.shape[:2],  # H, W, C
         )
         y_points = np.array(y_points).astype(np.int32)
-        y_mask = np.zeros(im.shape, dtype=np.uint8)  # 0-->background, 1-->horizon
+        y_mask = np.zeros(im.shape[:2], dtype=np.uint8)  # 0-->background, 1-->horizon
         cv2.line(y_mask, y_points[0], y_points[1], color=1, thickness=4)
 
         wb_images.append(
