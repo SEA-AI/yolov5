@@ -32,9 +32,11 @@ Example:
 NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 """
 
-import logging
 import argparse
+import logging
 from pathlib import Path
+from typing import Tuple
+
 import torch
 
 from export import export_onnx, export_onnx_trt7_compatible
@@ -79,7 +81,7 @@ def get_weights_path(weights_path: str) -> str:
 def main(
     det_weights: str,
     hor_weights: str,
-    imgsz: int,
+    imgsz: Tuple[int, int],
     batch_size: int,
     half: bool,
     fuse: bool,
@@ -87,6 +89,9 @@ def main(
     fname: str = "",
 ):
     """Export the model to TensorRT engine."""
+    # If imgsz is a single value, height and width are the same
+    imgsz = imgsz * 2 if len(imgsz) == 1 else imgsz
+
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
@@ -98,7 +103,8 @@ def main(
     )
 
     if not fname:
-        fname = f"{type(model).__name__.lower()}_b{batch_size}_sz{imgsz}.onnx"
+        input_size = f"{imgsz[0]}x{imgsz[1]}"
+        fname = f"{type(model).__name__.lower()}_b{batch_size}_sz{input_size}.onnx"
     print(f"🚀 Exporting model {type(model).__name__} to {fname}...")
 
     inplace = False  # default
@@ -115,7 +121,7 @@ def main(
     model.register_io_hooks()  # inp: uint8 -> fp32/fp16 / 255.0, out: fp16 -> fp32
 
     # Create dummy input
-    image = torch.zeros((batch_size, 3, imgsz, imgsz), device=model.device).byte()
+    image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte() # B, C, H, W
     # https://github.com/NVIDIA/TensorRT/issues/3026#issuecomment-1570419758
     image = image.float() if trt7_compatible else image
     print(f"🔮 Dummy input...{image.shape}, {image.dtype}")
@@ -153,9 +159,10 @@ def _parse_args():
     parser.add_argument(
         "-sz",
         "--imgsz",
-        type=int,
-        default=640,
-        help="Image size (square).",
+        nargs="+", 
+        type=int, 
+        default=[640, 640], 
+        help="image (h, w)"
     )
     parser.add_argument(
         "-bs",
