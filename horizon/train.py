@@ -57,6 +57,7 @@ def get_dataloaders(
     im_compression_prob: float,
     batch_size: int,
     field: str = "ground_truth_pl.polylines.closed",
+    num_workers: int = 8,
 ):
     # TODO: add tag check
     train_dataloader = get_train_dataloader(
@@ -67,6 +68,7 @@ def get_dataloaders(
         imgsz=imgsz,
         batch_size=batch_size,
         im_compression_prob=im_compression_prob,
+        num_workers=num_workers,
     )
 
     val_dataloader = get_val_dataloader(
@@ -76,6 +78,7 @@ def get_dataloaders(
         ),
         imgsz=imgsz,
         batch_size=batch_size,
+        num_workers=num_workers,
     )
 
     return train_dataloader, val_dataloader
@@ -478,22 +481,22 @@ def get_wb_images(model: HorizonModel, dataloader: DataLoader, n=10):
         y_pitch, y_theta = y_pitch.cpu().numpy(), y_theta.cpu().numpy()
 
         im = remove_black_padding(  # hack until dataloader is enhanced
-            (images[0, 0, ...] * 255).cpu().numpy().astype(np.uint8)
+            (images[0, ...] * 255).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
         )
 
         gt_points = pitch_theta_to_points(targets[0], targets[1], input_hw=images.shape[-2:], orig_hw=im.shape[:2])
         gt_points = np.array(gt_points).astype(np.int32)
-        gt_mask = np.zeros(im.shape, dtype=np.uint8)  # 0=background, 1=horizon
+        gt_mask = np.zeros(im.shape[:2], dtype=np.uint8)  # 0-->background, 1-->horizon
         cv2.line(gt_mask, gt_points[0], gt_points[1], color=1, thickness=4)
 
         y_points = pitch_theta_to_points(
             y_pitch.item(),
             y_theta.item(),
-            input_hw=images.shape[-2:],
-            orig_hw=im.shape[:2],
+            input_hw=images.shape[-2:],  # B, C, H, W
+            orig_hw=im.shape[:2],  # H, W, C
         )
         y_points = np.array(y_points).astype(np.int32)
-        y_mask = np.zeros(im.shape, dtype=np.uint8)  # 0=background, 1=horizon
+        y_mask = np.zeros(im.shape[:2], dtype=np.uint8)  # 0-->background, 1-->horizon
         cv2.line(y_mask, y_points[0], y_points[1], color=1, thickness=4)
 
         wb_images.append(
@@ -514,7 +517,8 @@ def remove_black_padding(image):
     """Remove black padding from an image."""
 
     # Apply a binary threshold to detect non-black areas
-    _, binary = cv2.threshold(image, 1, 255, cv2.THRESH_BINARY)
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if image.ndim == 3 else image
+    _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
 
     # Find contours
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

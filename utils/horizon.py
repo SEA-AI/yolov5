@@ -142,13 +142,15 @@ def scale_line_edges(
 
 
 def slope_intercept_to_points(m: float, b: float, w: int = 1, h: int = 1):
+    # to m, b in normalised space
     if m == np.inf:
-        x_1, y_1 = b * h, 0
-        x_2, y_2 = b * h, h
+        x_1, y_1 = b, 0
+        x_2, y_2 = b, 1
     else:
-        x_1, y_1 = 0, b * h
-        x_2, y_2 = w, m * w + b * h
-    return (x_1, y_1), (x_2, y_2)
+        x_1, y_1 = 0, b
+        x_2, y_2 = 1, m + b
+    # scale to image space
+    return (x_1 * w, y_1 * h), (x_2 * w, y_2 * h)
 
 
 def points_to_hough(x_1, y_1, x_2, y_2):
