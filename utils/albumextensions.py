@@ -1,15 +1,14 @@
 """Custom augmentations following the Albumentations API."""
 
 import random
-from typing import Dict, Optional, Tuple, Union, cast, List
+from typing import Dict, List, Optional, Tuple, Union, cast
 
 import cv2
 import numpy as np
 from albumentations.augmentations.geometric import functional as F
 from albumentations.core.pydantic import InterpolationType, ScaleIntType
-from albumentations.core.transforms_interface import DualTransform, BaseTransformInitSchema
-
-from pydantic import field_validator, ValidationInfo
+from albumentations.core.transforms_interface import BaseTransformInitSchema, DualTransform
+from pydantic import ValidationInfo, field_validator
 
 
 class MaxSizeHWInitSchema(BaseTransformInitSchema):
@@ -35,7 +34,7 @@ class MaxSizeHWInitSchema(BaseTransformInitSchema):
             return None
         if not isinstance(v, tuple) or len(v) != 2:
             raise ValueError(f"{info.field_name} must be a tuple of two integers")
-        if not all(x >= 1 for x in v):
+        if any(x < 1 for x in v):
             raise ValueError(f"All values in {info.field_name} must be bigger or equal to 1")
         return v
 
