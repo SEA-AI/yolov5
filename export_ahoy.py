@@ -35,7 +35,7 @@ NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 import argparse
 import logging
 from pathlib import Path
-from typing import Tuple
+from typing import List, Tuple
 
 import torch
 
@@ -76,7 +76,37 @@ def get_weights_path(weights_path: str) -> str:
     except Exception as e:
         logging.error(f"Failed to download from W&B: {str(e)}")
         raise e
+    
 
+def _transform_imgsz(imgsz: int | List[int] | Tuple[int,int]) -> Tuple[int,int]:
+    """
+    Convert size specifications to (height, width) tuple format.
+    
+    Args:
+        input_size: Int, list, or tuple representing dimensions.
+            - If int: converted to (input_size, input_size)
+            - If list/tuple with single element: converted to (element, element)
+            - If list/tuple with exactly 2 elements: converted to (element1, element2)
+    
+    Returns:
+        Tuple in (height, width) format.
+        
+    Raises:
+        ValueError: If input_size has more than 2 elements or cannot be converted.
+    """
+    # Handle scalar case (single integer)
+
+    if isinstance(imgsz, int):
+        return (imgsz, imgsz)
+    
+    # Handle sequence cases
+    if isinstance(imgsz, (list, tuple)):
+        if len(imgsz) == 1:
+            return (imgsz[0], imgsz[0])
+        elif len(imgsz) == 2:
+            return (imgsz[0], imgsz[1])
+        else:
+            raise ValueError(f"Input size must have 1 or 2 elements, got {len(imgsz)}")
 
 def main(
     det_weights: str,
@@ -89,8 +119,8 @@ def main(
     fname: str = "",
 ):
     """Export the model to TensorRT engine."""
-    # If imgsz is a single value, height and width are the same
-    imgsz = imgsz * 2 if len(imgsz) == 1 else imgsz
+    # Transform image size to (height, width) format
+    imgsz = _transform_imgsz(imgsz)
 
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
