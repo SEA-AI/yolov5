@@ -103,7 +103,7 @@ def _transform_imgsz(imgsz: int | List[int] | Tuple[int,int]) -> Tuple[int,int]:
 def main(
     det_weights: str,
     hor_weights: str,
-    imgsz: Tuple[int, int],
+    imgsz: int | Tuple[int, int],
     batch_size: int,
     half: bool,
     fuse: bool,
