@@ -32,6 +32,8 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from utils.general import check_amp
+
 wandb.login()
 
 FILE = Path(__file__).resolve()
@@ -317,7 +319,8 @@ def run(
 
     # Batch size
     if batch_size == -1:  # single-GPU only, estimate best batch size
-        batch_size = check_train_batch_size(model, imgsz)
+        amp = check_amp(model)  # check AMP
+        batch_size = check_train_batch_size(model, imgsz, amp)
     else:
         LOGGER.info(f"Batch Size = {batch_size}")
 
