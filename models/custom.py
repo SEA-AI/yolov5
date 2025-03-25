@@ -50,7 +50,7 @@ class HorizonModel(BaseModel):
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
-            model = attempt_load(weights, device="cpu", fuse=fuse)
+            model = attempt_load(weights, device=device, fuse=fuse)
             stride = model.stride
             LOGGER.info(f"Loaded weights from {weights}")
         else:
