@@ -32,8 +32,6 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from utils.general import check_amp
-
 wandb.login()
 
 FILE = Path(__file__).resolve()
@@ -46,7 +44,7 @@ from horizon.dataloaders import get_train_dataloader, get_val_dataloader  # noqa
 from models.custom import HorizonModel  # noqa: E402
 from utils.autobatch import check_train_batch_size  # noqa: E402
 from utils.downloads import attempt_download  # noqa: E402
-from utils.general import LOGGER, TQDM_BAR_FORMAT  # noqa: E402
+from utils.general import LOGGER, TQDM_BAR_FORMAT, check_amp  # noqa: E402
 from utils.horizon import pitch_theta_to_points  # noqa: E402
 from utils.torch_utils import ModelEMA, smart_optimizer  # noqa: E402
 
