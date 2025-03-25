@@ -83,30 +83,22 @@ def _transform_imgsz(imgsz: int | List[int] | Tuple[int,int]) -> Tuple[int,int]:
     Convert size specifications to (height, width) tuple format.
     
     Args:
-        input_size: Int, list, or tuple representing dimensions.
-            - If int: converted to (input_size, input_size)
-            - If list/tuple with single element: converted to (element, element)
-            - If list/tuple with exactly 2 elements: converted to (element1, element2)
+        imgsz: Int, list, or tuple representing dimensions.
+            - If int: converted to (imgsz, imgsz)
+            - If list/tuple with 1 or 2 elements: converted to (imgsz[0], imgsz[-1])
     
     Returns:
         Tuple in (height, width) format.
         
     Raises:
-        ValueError: If input_size has more than 2 elements or cannot be converted.
+        ValueError: If imgsz is not int, list, or tuple, or if list/tuple has more than 2 elements.
     """
     # Handle scalar case (single integer)
-
     if isinstance(imgsz, int):
-        return (imgsz, imgsz)
-    
-    # Handle sequence cases
-    if isinstance(imgsz, (list, tuple)):
-        if len(imgsz) == 1:
-            return (imgsz[0], imgsz[0])
-        elif len(imgsz) == 2:
-            return (imgsz[0], imgsz[1])
-        else:
-            raise ValueError(f"Input size must have 1 or 2 elements, got {len(imgsz)}")
+        return imgsz, imgsz
+    if not isinstance(imgsz, (list, tuple)) or len(imgsz) not in (1, 2):
+        raise ValueError(f"imgsz must be int or a list/tuple of 1 or 2 elements, got {imgsz}")
+    return imgsz[0], imgsz[-1]
 
 def main(
     det_weights: str,
