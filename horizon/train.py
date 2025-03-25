@@ -26,7 +26,6 @@ import torch
 import torch.nn as nn
 import wandb
 from fiftyone import ViewField as F
-from torch.cuda import amp
 from torch.nn import CrossEntropyLoss, Dropout
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
@@ -91,7 +90,7 @@ def update(
     loss_theta: CrossEntropyLoss,
     pitch_weight: float,
     theta_weight: float,
-    scaler: amp.GradScaler,
+    scaler: torch.cuda.amp.GradScaler,
     optimizer: torch.optim.Optimizer,
     ema: ModelEMA,
     epoch: int,
@@ -337,7 +336,8 @@ def run(
     loss_pitch = CrossEntropyLoss(label_smoothing=0.0)
     loss_theta = CrossEntropyLoss(label_smoothing=0.0)
 
-    scaler = amp.GradScaler(enabled=model.device != "cpu")
+    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+
 
     ema = ModelEMA(model)
     best_mse = 1e10
