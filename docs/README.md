@@ -41,7 +41,6 @@ YOLOv5 uses a defined format for their dataset. Since SEA.AI uses fiftyone for d
 
 Here's a snippet of the code that exports the dataset:
 ```python
-
 # for IR
 fo_splits = [f"TRAIN_by_sequence", f"VAL_by_sequence"]
 # for RGB
@@ -115,7 +114,8 @@ train.run(
 ### Training IR Entrypoint
 
 ```python
-from yolov5.horizon import train  # lazy import because of git_checkout
+from yolov5.horizon import train
+
 train.run(
     dataset_name="TRAIN_IR_ALL_2024_09_IMAGE_BB",
     train_tag="TRAIN_by_sequence",
@@ -130,7 +130,8 @@ train.run(
 ### Training RGB Entrypoint
 
 ```python
-from yolov5.horizon import train  # lazy import because of git_checkout
+from yolov5.horizon import train
+
 train.run(
     dataset_name="TRAIN_RGB_ALL_2025_02_IMAGE_BB",  # "TRAIN_IR_ALL_2024_09_IMAGE_BB"
     train_tag="TRAIN_v0",
