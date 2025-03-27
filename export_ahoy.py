@@ -32,9 +32,11 @@ Example:
 NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 """
 
-import logging
 import argparse
+import logging
 from pathlib import Path
+from typing import List, Tuple
+
 import torch
 
 from export import export_onnx, export_onnx_trt7_compatible
@@ -74,12 +76,34 @@ def get_weights_path(weights_path: str) -> str:
     except Exception as e:
         logging.error(f"Failed to download from W&B: {str(e)}")
         raise e
+    
 
+def _transform_imgsz(imgsz: int | List[int] | Tuple[int,int]) -> Tuple[int,int]:
+    """
+    Convert size specifications to (height, width) tuple format.
+    
+    Args:
+        imgsz: Int, list, or tuple representing dimensions.
+            - If int: converted to (imgsz, imgsz)
+            - If list/tuple with 1 or 2 elements: converted to (imgsz[0], imgsz[-1])
+    
+    Returns:
+        Tuple in (height, width) format.
+        
+    Raises:
+        ValueError: If imgsz is not int, list, or tuple, or if list/tuple has more than 2 elements.
+    """
+    # Handle scalar case (single integer)
+    if isinstance(imgsz, int):
+        return imgsz, imgsz
+    if not isinstance(imgsz, (list, tuple)) or len(imgsz) not in (1, 2):
+        raise ValueError(f"imgsz must be int or a list/tuple of 1 or 2 elements, got {imgsz}")
+    return imgsz[0], imgsz[-1]
 
 def main(
     det_weights: str,
     hor_weights: str,
-    imgsz: int,
+    imgsz: int | Tuple[int, int],
     batch_size: int,
     half: bool,
     fuse: bool,
@@ -87,6 +111,9 @@ def main(
     fname: str = "",
 ):
     """Export the model to TensorRT engine."""
+    # Transform image size to (height, width) format
+    imgsz = _transform_imgsz(imgsz)
+
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
@@ -98,7 +125,8 @@ def main(
     )
 
     if not fname:
-        fname = f"{type(model).__name__.lower()}_b{batch_size}_sz{imgsz}.onnx"
+        input_size = f"{imgsz[0]}x{imgsz[1]}"
+        fname = f"{type(model).__name__.lower()}_b{batch_size}_sz{input_size}.onnx"
     print(f"🚀 Exporting model {type(model).__name__} to {fname}...")
 
     inplace = False  # default
@@ -115,7 +143,7 @@ def main(
     model.register_io_hooks()  # inp: uint8 -> fp32/fp16 / 255.0, out: fp16 -> fp32
 
     # Create dummy input
-    image = torch.zeros((batch_size, 3, imgsz, imgsz), device=model.device).byte()
+    image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte() # B, C, H, W
     # https://github.com/NVIDIA/TensorRT/issues/3026#issuecomment-1570419758
     image = image.float() if trt7_compatible else image
     print(f"🔮 Dummy input...{image.shape}, {image.dtype}")
@@ -153,9 +181,10 @@ def _parse_args():
     parser.add_argument(
         "-sz",
         "--imgsz",
-        type=int,
-        default=640,
-        help="Image size (square).",
+        nargs="+", 
+        type=int, 
+        default=[640, 640], 
+        help="image (h, w)"
     )
     parser.add_argument(
         "-bs",
