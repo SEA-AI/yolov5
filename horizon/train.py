@@ -17,6 +17,7 @@ import sys
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from typing import Tuple
 
 import cv2
 import fiftyone as fo
@@ -25,7 +26,6 @@ import torch
 import torch.nn as nn
 import wandb
 from fiftyone import ViewField as F
-from torch.cuda import amp
 from torch.nn import CrossEntropyLoss, Dropout
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
@@ -43,7 +43,7 @@ from horizon.dataloaders import get_train_dataloader, get_val_dataloader  # noqa
 from models.custom import HorizonModel  # noqa: E402
 from utils.autobatch import check_train_batch_size  # noqa: E402
 from utils.downloads import attempt_download  # noqa: E402
-from utils.general import LOGGER, TQDM_BAR_FORMAT  # noqa: E402
+from utils.general import LOGGER, TQDM_BAR_FORMAT, check_amp  # noqa: E402
 from utils.horizon import pitch_theta_to_points  # noqa: E402
 from utils.torch_utils import ModelEMA, smart_optimizer  # noqa: E402
 
@@ -52,10 +52,11 @@ def get_dataloaders(
     dataset_name: str,
     train_tag: str,
     val_tag: str,
-    imgsz: int,
+    imgsz: Tuple[int, int],
     im_compression_prob: float,
     batch_size: int,
     field: str = "ground_truth_pl.polylines.closed",
+    num_workers: int = 8,
 ):
     # TODO: add tag check
     train_dataloader = get_train_dataloader(
@@ -64,8 +65,9 @@ def get_dataloaders(
             # .take(5000, seed=51)
         ),
         imgsz=imgsz,
-        batch_size=batch_size if imgsz == 640 else 16,
+        batch_size=batch_size,
         im_compression_prob=im_compression_prob,
+        num_workers=num_workers,
     )
 
     val_dataloader = get_val_dataloader(
@@ -74,7 +76,8 @@ def get_dataloaders(
             # .take(5000, seed=51)
         ),
         imgsz=imgsz,
-        batch_size=batch_size if imgsz == 640 else 16,
+        batch_size=batch_size,
+        num_workers=num_workers,
     )
 
     return train_dataloader, val_dataloader
@@ -87,7 +90,7 @@ def update(
     loss_theta: CrossEntropyLoss,
     pitch_weight: float,
     theta_weight: float,
-    scaler: amp.GradScaler,
+    scaler: torch.cuda.amp.GradScaler,
     optimizer: torch.optim.Optimizer,
     ema: ModelEMA,
     epoch: int,
@@ -257,7 +260,7 @@ def run(
     nc_theta: int = 500,  # number of theta classes
     pitch_weight: float = 1.0,  # pitch loss weight
     theta_weight: float = 1.0,  # theta loss weight
-    imgsz: int = 640,  # model input size (assumes squared input)
+    imgsz: int | Tuple[int, int] = 640,  # model input size (height, width)
     epochs: int = 100,
     dropout: float = 0.25,  # dropout rate for classification heads
     im_compression_prob: float = 0.9,
@@ -277,7 +280,7 @@ def run(
         nc_theta (int): Number of theta classes.
         pitch_weight (float): Weight for pitch loss.
         theta_weight (float): Weight for theta loss.
-        imgsz (int): Model input size (assumes squared input).
+        imgsz int | Tuple[int, int]: Model input size (height, width) or single value for square input.
         epochs (int): Number of training epochs.
         dropout (float): Dropout rate for classification heads.
         im_compression_prob (float): Probability for image compression augmentation.
@@ -287,6 +290,10 @@ def run(
     Returns:
         None
     """
+
+    # ensure that imgsz is a tuple (height, width)
+    imgsz = (imgsz, imgsz) if isinstance(imgsz, int) else imgsz
+
     # create dir to store checkpoints
     ckpt_dir = ROOT / "runs" / "horizon" / "train" / dataset_name
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -309,7 +316,8 @@ def run(
 
     # Batch size
     if batch_size == -1:  # single-GPU only, estimate best batch size
-        batch_size = check_train_batch_size(model, imgsz)
+        amp = check_amp(model)  # check AMP
+        batch_size = check_train_batch_size(model, imgsz, amp)
     else:
         LOGGER.info(f"Batch Size = {batch_size}")
 
@@ -328,7 +336,8 @@ def run(
     loss_pitch = CrossEntropyLoss(label_smoothing=0.0)
     loss_theta = CrossEntropyLoss(label_smoothing=0.0)
 
-    scaler = amp.GradScaler(enabled=model.device != "cpu")
+    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+
 
     ema = ModelEMA(model)
     best_mse = 1e10
@@ -473,22 +482,22 @@ def get_wb_images(model: HorizonModel, dataloader: DataLoader, n=10):
         y_pitch, y_theta = y_pitch.cpu().numpy(), y_theta.cpu().numpy()
 
         im = remove_black_padding(  # hack until dataloader is enhanced
-            (images[0, 0, ...] * 255).cpu().numpy().astype(np.uint8)
+            (images[0, ...] * 255).permute(1, 2, 0).cpu().numpy().astype(np.uint8)
         )
 
         gt_points = pitch_theta_to_points(targets[0], targets[1], input_hw=images.shape[-2:], orig_hw=im.shape[:2])
         gt_points = np.array(gt_points).astype(np.int32)
-        gt_mask = np.zeros(im.shape, dtype=np.uint8)  # 0=background, 1=horizon
+        gt_mask = np.zeros(im.shape[:2], dtype=np.uint8)  # 0-->background, 1-->horizon
         cv2.line(gt_mask, gt_points[0], gt_points[1], color=1, thickness=4)
 
         y_points = pitch_theta_to_points(
             y_pitch.item(),
             y_theta.item(),
-            input_hw=images.shape[-2:],
-            orig_hw=im.shape[:2],
+            input_hw=images.shape[-2:],  # B, C, H, W
+            orig_hw=im.shape[:2],  # H, W, C
         )
         y_points = np.array(y_points).astype(np.int32)
-        y_mask = np.zeros(im.shape, dtype=np.uint8)  # 0=background, 1=horizon
+        y_mask = np.zeros(im.shape[:2], dtype=np.uint8)  # 0-->background, 1-->horizon
         cv2.line(y_mask, y_points[0], y_points[1], color=1, thickness=4)
 
         wb_images.append(
@@ -509,7 +518,8 @@ def remove_black_padding(image):
     """Remove black padding from an image."""
 
     # Apply a binary threshold to detect non-black areas
-    _, binary = cv2.threshold(image, 1, 255, cv2.THRESH_BINARY)
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if image.ndim == 3 else image
+    _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
 
     # Find contours
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -535,7 +545,7 @@ def parse_args():
     parser.add_argument("--nc_theta", type=int, default=500, help="number of theta classes")
     parser.add_argument("--pitch_weight", type=float, default=1.0, help="pitch loss weight")
     parser.add_argument("--theta_weight", type=float, default=1.0, help="theta loss weight")
-    parser.add_argument("--imgsz", type=int, default=640, help="train, val image size")
+    parser.add_argument("--imgsz", type=int, nargs="*", default=640, help="train, val image size as height width (single value will be used for both height and width)")
     parser.add_argument("--epochs", type=int, default=100, help="number of epochs")
     parser.add_argument("--dropout", type=float, default=0.25, help="dropout rate")
 
@@ -558,4 +568,5 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+
     run(**vars(args))

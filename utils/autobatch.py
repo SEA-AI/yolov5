@@ -14,7 +14,7 @@ def check_train_batch_size(model, imgsz=640, amp=True):
     """Checks and computes optimal training batch size for YOLOv5 model, given image size and AMP setting."""
     with torch.cuda.amp.autocast(amp):
         return autobatch(deepcopy(model).train(), imgsz)  # compute optimal batch size
-
+    
 
 def autobatch(model, imgsz=640, fraction=0.8, batch_size=16):
     """Estimates optimal YOLOv5 batch size using `fraction` of CUDA memory."""
@@ -23,6 +23,9 @@ def autobatch(model, imgsz=640, fraction=0.8, batch_size=16):
     #     from utils.autobatch import autobatch
     #     model = torch.hub.load('ultralytics/yolov5', 'yolov5s', autoshape=False)
     #     print(autobatch(model))
+
+    # Change imgsz to tuple if it is a single number
+    imgsz = (imgsz, imgsz) if isinstance(imgsz, int) else imgsz
 
     # Check device
     prefix = colorstr("AutoBatch: ")
@@ -48,10 +51,11 @@ def autobatch(model, imgsz=640, fraction=0.8, batch_size=16):
     # Profile batch sizes
     batch_sizes = [1, 2, 4, 8, 16]
     try:
-        img = [torch.empty(b, 3, imgsz, imgsz) for b in batch_sizes]
+        img = [torch.empty(b, 3, imgsz[0], imgsz[1]) for b in batch_sizes]
         results = profile(img, model, n=3, device=device)
     except Exception as e:
         LOGGER.warning(f"{prefix}{e}")
+
 
     # Fit a solution
     y = [x[2] for x in results if x]  # memory [2]

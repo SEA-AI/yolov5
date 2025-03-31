@@ -63,6 +63,7 @@ class HorizonModel(BaseModel):
 
         self.model = model.model
         self.model.to(self.device)
+      
         self.model.half() if fp16 else self.model.float()
         self.stride = stride
         self.save = model.save

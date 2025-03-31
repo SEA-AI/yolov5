@@ -16,9 +16,10 @@ from torch.utils.data import DataLoader, Dataset
 
 import horizon.transforms as T
 
+
 def get_train_dataloader(
     dataset: fo.Dataset,
-    imgsz: int,
+    imgsz: Tuple[int, int],
     batch_size: int = 16,
     num_workers: int = 8,
     shuffle: bool = True,
@@ -44,7 +45,7 @@ def get_train_dataloader(
     
 def get_val_dataloader(
     dataset: fo.Dataset,
-    imgsz: int,
+    imgsz: Tuple[int, int],
     batch_size: int = 16,
     num_workers: int = 8,
     shuffle: bool = False,
