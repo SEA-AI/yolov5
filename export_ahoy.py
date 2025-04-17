@@ -14,13 +14,14 @@ Example:
         --det-weights yolov5n.pt \
         --hor-weights yolov5h.pt \
         --imgsz 640 \
+        --infsz 320
         --batch-size 2 \
         --fuse \
         --half \
         --fname ahoy.onnx
 
 # flatten this
-    python export_ahoy.py --det-weights yolov5n.pt --hor-weights yolov5h.pt imgsz 640 --batch-size 2 --fuse --half --fname ahoy.onnx
+    python export_ahoy.py --det-weights yolov5n.pt --hor-weights yolov5h.pt --imgsz 640 --infsz 320 --batch-size 2 --fuse --half --fname ahoy.onnx
 
 
     # Using W&B artifacts:
@@ -82,7 +83,7 @@ def get_weights_path(weights_path: str) -> str:
         raise e
     
 
-def _transform_imgsz(imgsz: int | List[int] | Tuple[int,int]) -> Tuple[int,int]:
+def _transform_sz(imgsz: int | List[int] | Tuple[int,int]) -> Tuple[int,int]:
     """
     Convert size specifications to (height, width) tuple format.
     
@@ -108,6 +109,7 @@ def main(
     det_weights: str,
     hor_weights: str,
     imgsz: int | Tuple[int, int],
+    infsz: int | Tuple[int, int],
     batch_size: int,
     half: bool,
     fuse: bool,
@@ -116,8 +118,9 @@ def main(
 ):
     """Export the model to TensorRT engine."""
     # Transform image size to (height, width) format
-    imgsz = _transform_imgsz(imgsz)
-
+    imgsz = _transform_sz(imgsz)
+    infsz = _transform_sz(infsz)
+    print("main", imgsz, infsz)
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
@@ -126,6 +129,8 @@ def main(
         hor_det_weights=hor_weights,
         fp16=half,
         fuse=fuse,
+        imgsz=imgsz,
+        infsz=infsz,
     )
 
     if not fname:
@@ -188,7 +193,14 @@ def _parse_args():
         nargs="+", 
         type=int, 
         default=[640, 640], 
-        help="image (h, w)"
+        help="image input shape (h, w)"
+    )
+    parser.add_argument(
+        "--infsz",
+        nargs="+", 
+        type=int, 
+        default=[640, 640], 
+        help="image shape during inference (h, w)"
     )
     parser.add_argument(
         "-bs",
