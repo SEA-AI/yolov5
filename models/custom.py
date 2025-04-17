@@ -4,6 +4,7 @@ from typing import Union
 import numpy as np
 import torch
 from torch import nn
+from torchvision import transforms
 
 from models.common import Classify, DetectMultiBackend
 from models.experimental import attempt_load
@@ -255,6 +256,7 @@ class ObjectsModel(BaseModel):
         self.save = model.save
 
 
+
 class AHOY(nn.Module):
     """A H-orizon O-bject detection Y-OLOv5."""
 
@@ -278,6 +280,14 @@ class AHOY(nn.Module):
 
         # keep track of hooks
         self.hooks = {}
+
+        self.pad_left, self.pad_right, self.pad_top, self.pad_bottom = self.get_padding_for_aspect_ratio(1080, 3600, 640, 1280)
+        self.ratio = max(1080/640, 3600/1280)
+        print("PADS", self.pad_left, self.pad_right, self.pad_top, self.pad_bottom)
+        self.transform = transforms.Compose([
+            transforms.Resize((640-self.pad_top-self.pad_bottom, 1280-self.pad_left-self.pad_right), interpolation=transforms.InterpolationMode.NEAREST, antialias=False),
+            transforms.Pad(padding=(self.pad_left, self.pad_top, self.pad_right, self.pad_bottom), fill = 0, padding_mode="constant")
+        ])
 
     def forward(self, x, profile=False, visualize=False):
         """Forward pass through models."""
@@ -309,18 +319,39 @@ class AHOY(nn.Module):
         self.hooks.clear()
 
     @staticmethod
+    def get_padding_for_aspect_ratio(h_in, w_in, h_out, w_out):
+        """
+        Calculates padding (left, right, top, bottom) needed after resizing
+        while preserving aspect ratio to fit exactly into (h_out, w_out).
+        """
+        scale = min(h_out / h_in, w_out / w_in)
+        new_h = int(h_in * scale)
+        new_w = int(w_in * scale)
+
+        pad_h = h_out - new_h
+        pad_w = w_out - new_w
+
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+
+        return pad_left, pad_right, pad_top, pad_bottom
+
+    @staticmethod
     def _preprocessing_hook(module, inputs):
         """Add preprocessing operations to be part of the model."""
 
         def _preprocess(x):
-            if not isinstance(x, torch.Tensor):
+            if len(x.shape) <1 :
                 return x
+            x = x.float()
+            x = module.transform(x)
             x = x.half() if module.fp16 else x.float()
             x = x / 255.0  # 0-255 to 0.0-1.0
             return x
 
         return tuple(_preprocess(inp) for inp in inputs)
-
 
     @staticmethod
     def _postprocessing_hook(module, inputs, outputs):
@@ -331,7 +362,12 @@ class AHOY(nn.Module):
 
         # ahoy outputs: (tuple(Tensor, ...), Tensor, Tensor)
         first_tuple, second_item, third_item = outputs
-
+        # print(first_tuple[0].shape)
+        # print(first_tuple[0][0,0,:])
+        first_tuple[0][:,:,0] -= module.pad_left
+        first_tuple[0][:,:,1] -= module.pad_top
+        first_tuple[0][:,:,:4] *= module.ratio 
+        # print(first_tuple[0][0,0,:])
         # Only convert the first item of the first tuple (the detection outputs)
         first_tuple = (_to_float(first_tuple[0]),) + first_tuple[1:]
 
