@@ -4,6 +4,7 @@ from typing import Union
 import numpy as np
 import torch
 from torch import nn
+from torchvision import transforms
 
 from models.common import Classify, DetectMultiBackend
 from models.experimental import attempt_load
@@ -255,6 +256,7 @@ class ObjectsModel(BaseModel):
         self.save = model.save
 
 
+
 class AHOY(nn.Module):
     """A H-orizon O-bject detection Y-OLOv5."""
 
@@ -266,6 +268,8 @@ class AHOY(nn.Module):
         device: Union[str, torch.device] = None,  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
+        imgsz: list = [640,640],
+        infsz: list = [640,640],
         inplace: bool = True,  # inplace modification of models
     ):
         super().__init__()
@@ -275,9 +279,14 @@ class AHOY(nn.Module):
         self.fp16 = fp16
         self.stride = self.obj_det.stride
         self.names = self.obj_det.names
+        self.imgsz = imgsz
+        self.infsz = infsz
 
         # keep track of hooks
         self.hooks = {}
+
+        # Scaling in Padding Preprocessing
+        self.transform = self.get_transform(imgsz, infsz)
 
     def forward(self, x, profile=False, visualize=False):
         """Forward pass through models."""
@@ -309,18 +318,62 @@ class AHOY(nn.Module):
         self.hooks.clear()
 
     @staticmethod
+    def get_transform(imgsz, infsz):
+        """Get the transformation to be applied to the image. Padding and/or resize, if needed."""
+        if imgsz == infsz:
+            return None
+
+        pad_left, pad_right, pad_top, pad_bottom = AHOY.get_padding_for_aspect_ratio(imgsz, infsz)
+        ratio = max(imgsz[0] / infsz[0], imgsz[1] / infsz[1])
+        transform = transforms.Compose([])
+        if ratio != 1:
+            transform.transforms.extend(
+                [transforms.Resize((infsz[0]-pad_top-pad_bottom, infsz[1]-pad_left-pad_right), interpolation=transforms.InterpolationMode.NEAREST, antialias=False)]
+            )
+        if pad_left != 0 or pad_right != 0 or pad_top != 0 or pad_bottom != 0:
+            transform.transforms.extend(
+                [transforms.Pad(padding=(pad_left, pad_top, pad_right, pad_bottom), fill = 0, padding_mode="constant")]
+            )
+        return transform
+
+    @staticmethod
+    def get_padding_for_aspect_ratio(imgsz, infsz):
+        """
+        Calculates padding (left, right, top, bottom) needed after resizing
+        while preserving aspect ratio to fit exactly into (h_out, w_out).
+        """
+        h_in, w_in = imgsz
+        h_out, w_out = infsz
+
+        scale = min(h_out / h_in, w_out / w_in)
+        new_h = int(h_in * scale)
+        new_w = int(w_in * scale)
+
+        pad_h = h_out - new_h
+        pad_w = w_out - new_w
+
+        pad_top = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left = pad_w // 2
+        pad_right = pad_w - pad_left
+
+        return pad_left, pad_right, pad_top, pad_bottom
+
+    @staticmethod
     def _preprocessing_hook(module, inputs):
         """Add preprocessing operations to be part of the model."""
 
         def _preprocess(x):
-            if not isinstance(x, torch.Tensor):
+            if len(x.shape) <1 :
                 return x
+            if module.transform is not None:
+                x = x.float()
+                x = module.transform(x)
             x = x.half() if module.fp16 else x.float()
             x = x / 255.0  # 0-255 to 0.0-1.0
             return x
 
         return tuple(_preprocess(inp) for inp in inputs)
-
 
     @staticmethod
     def _postprocessing_hook(module, inputs, outputs):
