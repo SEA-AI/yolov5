@@ -120,7 +120,6 @@ def main(
     # Transform image size to (height, width) format
     imgsz = _transform_sz(imgsz)
     infsz = _transform_sz(infsz)
-    print("main", imgsz, infsz)
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 

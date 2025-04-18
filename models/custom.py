@@ -320,21 +320,21 @@ class AHOY(nn.Module):
     @staticmethod
     def get_transform(imgsz, infsz):
         """Get the transformation to be applied to the image. Padding and/or resize, if needed."""
-        if imgsz != infsz:
-            pad_left, pad_right, pad_top, pad_bottom = AHOY.get_padding_for_aspect_ratio(imgsz, infsz)
-            ratio = max(imgsz[0] / infsz[0], imgsz[1] / infsz[1])
-            transform = transforms.Compose([])
-            if ratio != 1:
-                transform.transforms.extend(
-                    [transforms.Resize((infsz[0]-pad_top-pad_bottom, infsz[1]-pad_left-pad_right), interpolation=transforms.InterpolationMode.NEAREST, antialias=False)]
-                )
-            if pad_left != 0 or pad_right != 0 or pad_top != 0 or pad_bottom != 0:
-                transform.transforms.extend(
-                    [transforms.Pad(padding=(pad_left, pad_top, pad_right, pad_bottom), fill = 0, padding_mode="constant")]
-                )
-            return transform
-        else:
+        if imgsz == infsz:
             return None
+
+        pad_left, pad_right, pad_top, pad_bottom = AHOY.get_padding_for_aspect_ratio(imgsz, infsz)
+        ratio = max(imgsz[0] / infsz[0], imgsz[1] / infsz[1])
+        transform = transforms.Compose([])
+        if ratio != 1:
+            transform.transforms.extend(
+                [transforms.Resize((infsz[0]-pad_top-pad_bottom, infsz[1]-pad_left-pad_right), interpolation=transforms.InterpolationMode.NEAREST, antialias=False)]
+            )
+        if pad_left != 0 or pad_right != 0 or pad_top != 0 or pad_bottom != 0:
+            transform.transforms.extend(
+                [transforms.Pad(padding=(pad_left, pad_top, pad_right, pad_bottom), fill = 0, padding_mode="constant")]
+            )
+        return transform
 
     @staticmethod
     def get_padding_for_aspect_ratio(imgsz, infsz):
