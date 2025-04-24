@@ -1036,7 +1036,7 @@ class LoadImagesAndLabels(Dataset):
             shape = self.shapes[i]
             areas = image_labels[:, 3]*image_labels[:, 4]*shape[0]*shape[1]*self.img_size**2/(max(shape)**2)
             mask = areas < self.min_area
-            image_labels[mask, 0] = 80
+            image_labels[mask, 0] = 10
             # print(np.amax(areas))
             self.labels[i] = image_labels
 
