@@ -1035,7 +1035,10 @@ class LoadImagesAndLabels(Dataset):
         for i, image_labels in enumerate(self.labels):
             shape = self.shapes[i]
             areas = image_labels[:, 3]*image_labels[:, 4]*shape[0]*shape[1]*self.img_size**2/(max(shape)**2)
-            self.labels[i] = image_labels[areas > self.min_area]
+            mask = areas < self.min_area
+            image_labels[mask, 0] = 80
+            # print(np.amax(areas))
+            self.labels[i] = image_labels
 
     @staticmethod
     def collate_fn(batch):
