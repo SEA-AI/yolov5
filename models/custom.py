@@ -478,7 +478,7 @@ class AHOYOBB(AHOY):
 
         # Only convert the first item of the first tuple (the detection outputs)
         first_tuple = (_to_float(first_tuple[0]), ) + first_tuple[1:]
-        second_tuple = (_to_float(second_tuple[0]), ) 
+        second_tuple = (_to_float(second_tuple[0].transpose(1, 2)), ) 
 
         return (first_tuple, second_tuple)
 
