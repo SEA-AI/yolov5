@@ -424,7 +424,7 @@ class AHOY(nn.Module):
 
 
 class AHOYOBB(AHOY):
-    """A H-orizon O-bject detection Y-OLOv5."""
+    """A H-orizon (with OBB) O-bject detection Y-OLOv5 (object detection with yolov5)."""
 
     # Ensemble of models
     def __init__(
