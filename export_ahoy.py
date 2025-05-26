@@ -1,5 +1,5 @@
 """
-Export AHOY to ONNX format.
+Export AHOY or AHOY with Horizon-OBB to ONNX format.
 
 ONNX is an open standard for machine learning models that enables interoperability 
 between different frameworks and platforms.
@@ -18,7 +18,9 @@ Example:
         --batch-size 2 \
         --fuse \
         --half \
-        --fname ahoy.onnx
+        --fname ahoy.onnx \
+        --obb 
+
 
 # flatten this
     python export_ahoy.py --det-weights yolov5n.pt --hor-weights yolov5h.pt --imgsz 640 --infsz 320 --batch-size 2 --fuse --half --fname ahoy.onnx
