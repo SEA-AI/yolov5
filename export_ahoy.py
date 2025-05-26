@@ -45,7 +45,7 @@ from typing import List, Tuple
 import torch
 
 from export import export_onnx, export_onnx_trt7_compatible
-from models.custom import AHOY
+from models.custom import AHOY, AHOYOBB
 from models.yolo import Detect
 
 logging.basicConfig(level=logging.INFO)
@@ -113,6 +113,7 @@ def main(
     batch_size: int,
     half: bool,
     fuse: bool,
+    obb: bool,
     trt7_compatible: bool = False,
     fname: str = "",
 ):
@@ -123,7 +124,8 @@ def main(
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
-    model = AHOY(
+    model_class = AHOYOBB if obb else AHOY
+    model = model_class(
         obj_det_weigths=det_weights,
         hor_det_weights=hor_weights,
         fp16=half,
@@ -219,6 +221,11 @@ def _parse_args():
         "--half",
         action="store_true",
         help="Export half-precision model.",
+    )
+    parser.add_argument(
+        "--obb",
+        action="store_true",
+        help="Use OBB model for the horizon",
     )
     parser.add_argument(
         "-trt7",
