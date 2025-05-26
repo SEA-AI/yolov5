@@ -462,11 +462,6 @@ class AHOYOBB(AHOY):
         horizons = self.hor_det(x)
         return objects, horizons
 
-    def register_io_hooks(self):
-        """Register hooks for input and output processing."""
-        self.register_preprocessing_hook()
-        self.register_postprocessing_hook()
-
     @staticmethod
     def _postprocessing_hook(module, inputs, outputs):
         """Convert outputs to float (if needed) and apply softmax to logits."""
