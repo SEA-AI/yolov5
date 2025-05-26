@@ -30,7 +30,10 @@ class OBBModel(BaseModel):
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
-            model = (lambda m: m.fuse() if fuse else m)(YOLO(model=weights).model)
+            model = YOLO(model=weights)
+            if fuse:
+                model.fuse()
+            model = model.model
             stride = model.stride
             LOGGER.info(f"Loaded weights from {weights}")
         else:
