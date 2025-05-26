@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 from torchvision import transforms
+from ultralytics import YOLO
 
 from models.common import Classify, DetectMultiBackend
 from models.experimental import attempt_load
@@ -13,6 +14,36 @@ from utils.general import LOGGER
 from utils.plots import feature_visualization
 from utils.torch_utils import select_device
 
+
+class OBBModel(BaseModel):
+    """Wrapper around yolo-OBB Model."""
+
+    def __init__(
+        self,
+        weights: str = "yolov11n-obb.pt",
+        device: Union[str, torch.device] = None,  # automatically select device
+        fp16: bool = False,
+        fuse: bool = False,
+    ):
+        super().__init__()
+        self.device = select_device(device)
+        self.fp16 = fp16
+
+        if Path(weights).is_file() or weights.endswith(".pt"):
+            model = YOLO(model=weights)
+            if fuse:
+                model.fuse()
+            model = model.model
+            stride = model.stride
+            LOGGER.info(f"Loaded weights from {weights}")
+        else:
+            raise ValueError("model must be a path to a .pt file")
+
+        self.model = model.model
+        self.model.to(self.device)
+        self.model.half() if fp16 else self.model.float()
+        self.stride = stride
+        self.save = model.save
 
 class HorizonModel(BaseModel):
     """YOLOv5 backbone + classification heads for pitch and theta."""
@@ -395,6 +426,60 @@ class AHOY(nn.Module):
         # Reconstruct the overall output
         return (first_tuple, _to_float(second_item), _to_float(third_item))
 
+
+class AHOYOBB(AHOY):
+    """A H-orizon (with OBB) O-bject detection Y-OLOv5 (object detection with yolov5)."""
+
+    # Ensemble of models
+    def __init__(
+        self,
+        obj_det_weigths: str,
+        hor_det_weights: str,
+        device: Union[str,
+                    torch.device] = None,  # automatically select device
+        fp16: bool = False,
+        fuse: bool = True,  # fuse conv and bn layers
+        imgsz: list = [640, 640],
+        infsz: list = [640, 640],
+        inplace: bool = True,  # inplace modification of models
+    ):
+        nn.Module.__init__(self) 
+        self.obj_det = ObjectsModel(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
+        self.hor_det = OBBModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
+        self.device = select_device(device)
+        self.fp16 = fp16
+        self.stride = self.obj_det.stride
+        self.names = self.obj_det.names
+        self.imgsz = imgsz
+        self.infsz = infsz
+
+        # keep track of hooks
+        self.hooks = {}
+        print("🚀 AHOY model: yolov5 + yolo[v8|11]-obb")
+        # Scaling in Padding Preprocessing
+        self.transform = self.get_transform(imgsz, infsz)
+
+    def forward(self, x, profile=False, visualize=False):
+        """Forward pass through models."""
+        objects = self.obj_det(x, profile, visualize)
+        horizons = self.hor_det(x)
+        return objects, horizons
+
+    @staticmethod
+    def _postprocessing_hook(module, inputs, outputs):
+        """Convert outputs to float (if needed) and apply softmax to logits."""
+
+        def _to_float(x):
+            return x.float() if module.fp16 else x
+
+        # ahoy outputs: (tuple(Tensor, ...), Tensor, Tensor)
+        first_tuple, second_tuple = outputs
+
+        # Only convert the first item of the first tuple (the detection outputs)
+        first_tuple = (_to_float(first_tuple[0]), ) + first_tuple[1:]
+        second_tuple = (_to_float(second_tuple[0].transpose(1, 2)), ) 
+
+        return (first_tuple, second_tuple)
 
 class DAN(nn.Module):
     """

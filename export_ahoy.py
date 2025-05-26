@@ -1,5 +1,5 @@
 """
-Export AHOY to ONNX format.
+Export AHOY or AHOYOBB(with Horizon-OBB) to ONNX format.
 
 ONNX is an open standard for machine learning models that enables interoperability 
 between different frameworks and platforms.
@@ -12,17 +12,13 @@ Example:
     # Using local weights files:
     python export_ahoy.py \
         --det-weights yolov5n.pt \
-        --hor-weights yolov5h.pt \
+        --hor-weights yolov11n-obb.pt \
         --imgsz 640 \
         --infsz 320
         --batch-size 2 \
         --fuse \
         --half \
         --fname ahoy.onnx
-
-# flatten this
-    python export_ahoy.py --det-weights yolov5n.pt --hor-weights yolov5h.pt --imgsz 640 --infsz 320 --batch-size 2 --fuse --half --fname ahoy.onnx
-
 
     # Using W&B artifacts:
     python export_ahoy.py \
@@ -45,7 +41,7 @@ from typing import List, Tuple
 import torch
 
 from export import export_onnx, export_onnx_trt7_compatible
-from models.custom import AHOY
+from models.custom import AHOY, AHOYOBB
 from models.yolo import Detect
 
 logging.basicConfig(level=logging.INFO)
@@ -123,7 +119,8 @@ def main(
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
-    model = AHOY(
+    model_class = AHOYOBB if "obb" in hor_weights.lower() else AHOY
+    model = model_class(
         obj_det_weigths=det_weights,
         hor_det_weights=hor_weights,
         fp16=half,

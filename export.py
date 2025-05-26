@@ -331,12 +331,12 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
     check_requirements("onnx>=1.12.0")
     import onnx
 
-    from models.custom import AHOY, DAN
+    from models.custom import AHOY, AHOYOBB, DAN
 
     LOGGER.info(f"\n{prefix} starting export with onnx {onnx.__version__}...")
     f = str(file.with_suffix(".onnx"))
 
-    if isinstance(model, SegmentationModel):
+    if isinstance(model,(SegmentationModel, AHOYOBB)):
         input_names = ["images"]
         output_names = ["output0", "output1"]
     elif isinstance(model, AHOY):
