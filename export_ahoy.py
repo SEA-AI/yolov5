@@ -1,5 +1,5 @@
 """
-Export AHOY or AHOYOBB( with Horizon-OBB) to ONNX format.
+Export AHOY or AHOYOBB(with Horizon-OBB) to ONNX format.
 
 ONNX is an open standard for machine learning models that enables interoperability 
 between different frameworks and platforms.
