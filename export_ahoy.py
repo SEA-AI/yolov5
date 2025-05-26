@@ -18,7 +18,7 @@ Example:
         --batch-size 2 \
         --fuse \
         --half \
-        --fname ahoy.onnx \
+        --fname ahoy.onnx
 
     # Using W&B artifacts:
     python export_ahoy.py \
