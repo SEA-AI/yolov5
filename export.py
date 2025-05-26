@@ -338,7 +338,7 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
 
     if isinstance(model,(SegmentationModel, AHOYOBB)):
         input_names = ["images"]
-        output_names = ["output0", "output1"]    
+        output_names = ["output0", "output1"]
     elif isinstance(model, AHOY):
         input_names = ["images"]
         output_names = ["output0", "output1", "output2"]

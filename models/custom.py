@@ -15,23 +15,24 @@ from utils.plots import feature_visualization
 from utils.torch_utils import select_device
 
 
-class HorizonOBBModel(BaseModel):
-    """Wrapper around YOLOv5 DetectionModel."""
+class OBBModel(BaseModel):
+    """Wrapper around yolo-OBB Model."""
 
     def __init__(
         self,
-        hor_det_weights: str = "yolov11n-obb.pt",
+        weights: str = "yolov11n-obb.pt",
         device: Union[str, torch.device] = None,  # automatically select device
         fp16: bool = False,
+        fuse: bool = False,
     ):
         super().__init__()
         self.device = select_device(device)
         self.fp16 = fp16
 
-        if Path(hor_det_weights).is_file() or hor_det_weights.endswith(".pt"):
-            model = YOLO(model=hor_det_weights).model
+        if Path(weights).is_file() or weights.endswith(".pt"):
+            model = (lambda m: m.fuse() if fuse else m)(YOLO(model=weights).model)
             stride = model.stride
-            LOGGER.info(f"Loaded weights from {hor_det_weights}")
+            LOGGER.info(f"Loaded weights from {weights}")
         else:
             raise ValueError("model must be a path to a .pt file")
 
@@ -441,7 +442,7 @@ class AHOYOBB(AHOY):
     ):
         nn.Module.__init__(self) 
         self.obj_det = ObjectsModel(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
-        self.hor_det = HorizonOBBModel(hor_det_weights=hor_det_weights, device=device, fp16=fp16)
+        self.hor_det = OBBModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
         self.device = select_device(device)
         self.fp16 = fp16
         self.stride = self.obj_det.stride
@@ -451,7 +452,7 @@ class AHOYOBB(AHOY):
 
         # keep track of hooks
         self.hooks = {}
-        print("🚀 AHOY model with Horizon-OBB loaded")
+        print("🚀 AHOY model: yolov5 + yolo[v8|11]-obb")
         # Scaling in Padding Preprocessing
         self.transform = self.get_transform(imgsz, infsz)
 
