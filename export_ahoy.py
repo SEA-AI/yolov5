@@ -20,11 +20,6 @@ Example:
         --half \
         --fname ahoy.onnx \
 
-
-# flatten this
-    python export_ahoy.py --det-weights yolov5n.pt --hor-weights yolov11n-obb.pt --imgsz 640 --infsz 320 --batch-size 2 --fuse --half --fname ahoy.onnx
-
-
     # Using W&B artifacts:
     python export_ahoy.py \
         --det-weights YOLOv5n-IR:latest \
