@@ -77,20 +77,20 @@ def get_weights_path(weights_path: str) -> str:
     except Exception as e:
         logging.error(f"Failed to download from W&B: {str(e)}")
         raise e
-    
 
-def _transform_sz(imgsz: int | List[int] | Tuple[int,int]) -> Tuple[int,int]:
+
+def _transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
     """
     Convert size specifications to (height, width) tuple format.
-    
+
     Args:
         imgsz: Int, list, or tuple representing dimensions.
             - If int: converted to (imgsz, imgsz)
             - If list/tuple with 1 or 2 elements: converted to (imgsz[0], imgsz[-1])
-    
+
     Returns:
         Tuple in (height, width) format.
-        
+
     Raises:
         ValueError: If imgsz is not int, list, or tuple, or if list/tuple has more than 2 elements.
     """
@@ -101,11 +101,12 @@ def _transform_sz(imgsz: int | List[int] | Tuple[int,int]) -> Tuple[int,int]:
         raise ValueError(f"imgsz must be int or a list/tuple of 1 or 2 elements, got {imgsz}")
     return imgsz[0], imgsz[-1]
 
+
 def main(
     det_weights: str,
     hor_weights: str,
     imgsz: int | Tuple[int, int],
-    infsz: int | Tuple[int, int],
+    infsz: int | Tuple[int, int] | None,
     batch_size: int,
     half: bool,
     fuse: bool,
@@ -115,7 +116,7 @@ def main(
     """Export the model to TensorRT engine."""
     # Transform image size to (height, width) format
     imgsz = _transform_sz(imgsz)
-    infsz = _transform_sz(infsz)
+    infsz = _transform_sz(imgsz) if infsz is None else _transform_sz(infsz)
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
@@ -148,7 +149,7 @@ def main(
     model.register_io_hooks()  # inp: uint8 -> fp32/fp16 / 255.0, out: fp16 -> fp32
 
     # Create dummy input
-    image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte() # B, C, H, W
+    image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte()  # B, C, H, W
     # https://github.com/NVIDIA/TensorRT/issues/3026#issuecomment-1570419758
     image = image.float() if trt7_compatible else image
     print(f"🔮 Dummy input...{image.shape}, {image.dtype}")
@@ -168,7 +169,7 @@ def main(
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
         "-dw",
         "--det-weights",
@@ -183,20 +184,13 @@ def _parse_args():
         required=True,
         help="Path to the horizontal model weights.",
     )
-    parser.add_argument(
-        "-sz",
-        "--imgsz",
-        nargs="+", 
-        type=int, 
-        default=[640, 640], 
-        help="image input shape (h, w)"
-    )
+    parser.add_argument("-sz", "--imgsz", nargs="+", type=int, default=[640, 640], help="image input shape (h, w)")
     parser.add_argument(
         "--infsz",
-        nargs="+", 
-        type=int, 
-        default=[640, 640], 
-        help="image shape during inference (h, w)"
+        nargs="+",
+        type=int,
+        default=None,
+        help="image shape during inference (h, w). If not specified, uses same size as imgsz",
     )
     parser.add_argument(
         "-bs",
