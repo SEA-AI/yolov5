@@ -105,7 +105,7 @@ def main(
     det_weights: str,
     hor_weights: str,
     imgsz: int | Tuple[int, int],
-    infsz: int | Tuple[int, int],
+    infsz: int | Tuple[int, int] | None,
     batch_size: int,
     half: bool,
     fuse: bool,
@@ -115,7 +115,7 @@ def main(
     """Export the model to TensorRT engine."""
     # Transform image size to (height, width) format
     imgsz = _transform_sz(imgsz)
-    infsz = _transform_sz(infsz)
+    infsz = _transform_sz(imgsz) if infsz is None else _transform_sz(infsz)
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
@@ -168,7 +168,7 @@ def main(
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
         "-dw",
         "--det-weights",
@@ -195,8 +195,8 @@ def _parse_args():
         "--infsz",
         nargs="+", 
         type=int, 
-        default=[640, 640], 
-        help="image shape during inference (h, w)"
+        default=None, 
+        help="image shape during inference (h, w). If not specified, uses same size as imgsz"
     )
     parser.add_argument(
         "-bs",
