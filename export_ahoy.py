@@ -45,7 +45,6 @@ from models.yolo import Detect
 from utils.general import LOGGER
 
 
-
 def get_weights_path(weights_path: str) -> str:
     """Get model weights from local path or W&B registry.
 
@@ -109,6 +108,7 @@ def main(
     batch_size: int,
     half: bool,
     fuse: bool,
+    dynamic: bool = False,
     trt7_compatible: bool = False,
     fname: str = "",
 ):
@@ -134,17 +134,7 @@ def main(
         fname = f"{type(model).__name__.lower()}_b{batch_size}_sz{input_size}.onnx"
     LOGGER.info(f"🚀 Exporting model {type(model).__name__} to {fname}...")
 
-    inplace = False  # default
-    dynamic = False  # default
-
-    # Update model
-    model.eval()
-    LOGGER.info("✨ Preparing the model for export...")
-    for _, m in model.named_modules():
-        if isinstance(m, Detect):
-            m.inplace = inplace
-            m.dynamic = dynamic
-            m.export = True
+    model.prepare_for_export(dynamic=dynamic)
     model.register_io_hooks()  # inp: uint8 -> fp32/fp16 / 255.0, out: fp16 -> fp32
 
     # Create dummy input
