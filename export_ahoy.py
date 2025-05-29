@@ -34,7 +34,6 @@ NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 """
 
 import argparse
-import logging
 from pathlib import Path
 from typing import List, Tuple
 
@@ -43,8 +42,8 @@ import torch
 from export import export_onnx, export_onnx_trt7_compatible
 from models.custom import AHOY, AHOYOBB
 from models.yolo import Detect
+from utils.general import LOGGER
 
-logging.basicConfig(level=logging.INFO)
 
 
 def get_weights_path(weights_path: str) -> str:
@@ -62,7 +61,7 @@ def get_weights_path(weights_path: str) -> str:
     try:
         import wandb
     except ImportError:
-        logging.error("Please install wandb to download models from W&B registry")
+        LOGGER.error("Please install wandb to download models from W&B registry")
         return weights_path
 
     try:
@@ -75,7 +74,7 @@ def get_weights_path(weights_path: str) -> str:
         return next(Path(artifact_path).glob("*.pt"))
 
     except Exception as e:
-        logging.error(f"Failed to download from W&B: {str(e)}")
+        LOGGER.error(f"Failed to download from W&B: {str(e)}")
         raise e
 
 
@@ -133,14 +132,14 @@ def main(
     if not fname:
         input_size = f"{imgsz[0]}x{imgsz[1]}"
         fname = f"{type(model).__name__.lower()}_b{batch_size}_sz{input_size}.onnx"
-    print(f"🚀 Exporting model {type(model).__name__} to {fname}...")
+    LOGGER.info(f"🚀 Exporting model {type(model).__name__} to {fname}...")
 
     inplace = False  # default
     dynamic = False  # default
 
     # Update model
     model.eval()
-    print("✨ Preparing the model for export...")
+    LOGGER.info("✨ Preparing the model for export...")
     for _, m in model.named_modules():
         if isinstance(m, Detect):
             m.inplace = inplace
@@ -152,7 +151,7 @@ def main(
     image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte()  # B, C, H, W
     # https://github.com/NVIDIA/TensorRT/issues/3026#issuecomment-1570419758
     image = image.float() if trt7_compatible else image
-    print(f"🔮 Dummy input...{image.shape}, {image.dtype}")
+    LOGGER.info(f"🔮 Dummy input...{image.shape}, {image.dtype}")
 
     model(image)  # need to run once to get the model to JIT compile
 
@@ -165,7 +164,7 @@ def main(
         simplify=False,
         opset=12,
     )
-    print(f"🎉 Model successfully exported to {f}! 🚀")
+    LOGGER.info(f"🎉 Model successfully exported to {f}! 🚀")
 
 
 def _parse_args():
