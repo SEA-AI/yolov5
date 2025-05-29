@@ -71,7 +71,7 @@ def get_weights_path(weights_path: str) -> str:
 
         api = wandb.Api()
         artifact_name = f"wandb-registry-{REGISTRY}/{collection}:{version}"
-        artifact_path = api.artifact(name=artifact_name).download()
+        artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
         return next(Path(artifact_path).glob("*.pt"))
 
     except Exception as e:
@@ -120,7 +120,7 @@ def main(
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
-    model_class = AHOYOBB if "obb" in hor_weights.lower() else AHOY
+    model_class = AHOYOBB if "obb" in str(hor_weights).lower() else AHOY
     model = model_class(
         obj_det_weigths=det_weights,
         hor_det_weights=hor_weights,
