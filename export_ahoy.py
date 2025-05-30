@@ -144,7 +144,7 @@ def main(
     model(image)  # need to run once to get the model to JIT compile
 
     export_func = export_onnx_trt7_compatible if trt7_compatible else export_onnx
-    f, _ = export_func(
+    _ = export_func(
         model,
         im=image,
         file=Path(fname),
@@ -152,7 +152,6 @@ def main(
         simplify=False,
         opset=12,
     )
-    LOGGER.info(f"🎉 Model successfully exported to {f}! 🚀")
 
 
 def _parse_args():
