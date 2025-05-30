@@ -959,11 +959,15 @@ def scale_boxes(img1_shape, boxes, img0_shape, ratio_pad=None, xywh: bool = Fals
         gain = ratio_pad[0][0]
         pad = ratio_pad[1]
 
-    boxes[..., 0] -= pad[0]  # x padding
-    boxes[..., 1] -= pad[1]  # y padding
+    if pad[0] != 0:
+        boxes[..., 0] -= pad[0]  # x padding
+    if pad[1] != 0:
+        boxes[..., 1] -= pad[1]  # y padding
     if not xywh:
-        boxes[..., 2] -= pad[0]  # x padding
-        boxes[..., 3] -= pad[1]  # y padding
+        if pad[0] != 0:
+            boxes[..., 2] -= pad[0]  # x padding
+        if pad[1] != 0:
+            boxes[..., 3] -= pad[1]  # y padding
     boxes[..., :4] /= gain
     if clip:
         clip_boxes(boxes, img0_shape)
