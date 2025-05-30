@@ -108,6 +108,7 @@ def main(
     half: bool,
     fuse: bool,
     dynamic: bool = False,
+    simplify: bool = False,
     trt7_compatible: bool = False,
     fname: str = "",
 ):
@@ -149,7 +150,7 @@ def main(
         im=image,
         file=Path(fname),
         dynamic=dynamic,
-        simplify=False,
+        simplify=simplify,
         opset=12,
     )
 
@@ -196,6 +197,12 @@ def _parse_args():
         "--half",
         action="store_true",
         help="Export half-precision model.",
+    )
+    parser.add_argument(
+        "-si",
+        "--simplify",
+        action="store_true",
+        help="Simplify the exported model.",
     )
     parser.add_argument(
         "-trt7",
