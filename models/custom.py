@@ -9,7 +9,7 @@ from torchvision import transforms
 from ultralytics import YOLO
 from ultralytics.nn.tasks import BaseModel as UBaseModel
 
-from utils.general import LOGGER
+from utils.general import LOGGER, scale_boxes
 from utils.plots import feature_visualization
 from utils.torch_utils import select_device
 from models.common import Classify, DetectMultiBackend
@@ -396,7 +396,7 @@ class AHOY(nn.Module):
         self.hooks = {}
 
         # Scaling in Padding Preprocessing
-        self.transform = self.get_transform(imgsz, infsz)
+        self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
 
         LOGGER.debug(
             f"Object detection model info: "
@@ -454,10 +454,11 @@ class AHOY(nn.Module):
     def get_transform(imgsz: Tuple[int, int], infsz: Optional[Tuple[int, int]] = None):
         """Get the transformation to be applied to the image. Padding and/or resize, if needed."""
         if imgsz == infsz or infsz is None:
-            return None
+            return None, None
 
         pad_left, pad_right, pad_top, pad_bottom = AHOY.get_padding_for_aspect_ratio(imgsz, infsz)
         ratio = max(imgsz[0] / infsz[0], imgsz[1] / infsz[1])
+        ratio_pad = [[1 / ratio], [pad_left, pad_top]]  # [[gain], [pad_x, pad_y]] for scale_boxes
         transform = transforms.Compose([])
         if ratio != 1:
             transform.transforms.extend(
@@ -467,7 +468,7 @@ class AHOY(nn.Module):
                             infsz[0] - pad_top - pad_bottom,
                             infsz[1] - pad_left - pad_right,
                         ),
-                        interpolation=transforms.InterpolationMode.NEAREST,
+                        interpolation=transforms.InterpolationMode.BILINEAR,
                         antialias=False,
                     )
                 ]
@@ -482,7 +483,7 @@ class AHOY(nn.Module):
                     )
                 ]
             )
-        return transform
+        return transform, ratio_pad
 
     @staticmethod
     def get_padding_for_aspect_ratio(imgsz, infsz):
@@ -561,6 +562,12 @@ class AHOYv1(AHOY):
         # ahoy outputs: (tuple(Tensor, ...), Tensor, Tensor)
         first_tuple, second_item, third_item = outputs
 
+        # Scale back boxes if transform was applied
+        if module.ratio_pad is not None:
+            first_tuple = (
+                scale_boxes(module.infsz, first_tuple[0], module.imgsz, ratio_pad=module.ratio_pad),
+            ) + first_tuple[1:]
+
         # Only convert the first item of the first tuple (the detection outputs)
         first_tuple = (_to_float(first_tuple[0]),) + first_tuple[1:]
 
@@ -598,9 +605,21 @@ class AHOYv2(AHOY):
         # second_tuple: Tensor
         first_tuple, second_item = outputs
 
+        # transpose to (batch_size, num_boxes, num_classes)
+        second_item = second_item.transpose(1, 2)
+
+        # Scale back boxes if transform was applied
+        if module.ratio_pad is not None:
+            first_tuple = (
+                scale_boxes(module.infsz, first_tuple[0], module.imgsz, ratio_pad=module.ratio_pad),
+            ) + first_tuple[1:]
+            second_item = scale_boxes(
+                module.infsz, second_item, module.imgsz, ratio_pad=module.ratio_pad, xywh=True, clip=False
+            )
+
         # Only convert the first item of the first tuple (the detection outputs)
         first_tuple = (_to_float(first_tuple[0]),) + first_tuple[1:]
-        second_item = _to_float(second_item.transpose(1, 2))
+        second_item = _to_float(second_item)
 
         return (first_tuple, second_item)
 
