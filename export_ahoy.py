@@ -1,5 +1,5 @@
 """
-Export AHOY or AHOYOBB(with Horizon-OBB) to ONNX format.
+Export AHOY to ONNX format.
 
 ONNX is an open standard for machine learning models that enables interoperability 
 between different frameworks and platforms.
@@ -40,8 +40,7 @@ from typing import List, Tuple
 import torch
 
 from export import export_onnx, export_onnx_trt7_compatible
-from models.custom import AHOY, AHOYOBB
-from models.yolo import Detect
+from models.custom import AHOY
 from utils.general import LOGGER
 
 
@@ -70,7 +69,7 @@ def get_weights_path(weights_path: str) -> str:
         api = wandb.Api()
         artifact_name = f"wandb-registry-{REGISTRY}/{collection}:{version}"
         artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
-        return next(Path(artifact_path).glob("*.pt"))
+        return str(next(Path(artifact_path).glob("*.pt")))
 
     except Exception as e:
         LOGGER.error(f"Failed to download from W&B: {str(e)}")
@@ -119,8 +118,7 @@ def main(
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
-    model_class = AHOYOBB if "obb" in str(hor_weights).lower() else AHOY
-    model = model_class(
+    model = AHOY(
         obj_det_weigths=det_weights,
         hor_det_weights=hor_weights,
         fp16=half,

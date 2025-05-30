@@ -347,7 +347,29 @@ class ObjectsModel(BaseModel):
 
 
 class AHOY(nn.Module):
-    """A H-orizon O-bject detection Y-OLOv5."""
+    """Base class for AHOY models.
+
+    AHOY Stands for the following:
+    - **A**
+    - **H**orizon and
+    - **O**bject detection
+    - **Y**olo-based model
+    """
+
+    def __new__(cls, hor_det_weights: str, **kwargs):
+        """Create the appropriate AHOY model instance based on the model path.
+
+        Args:
+            model_path: Path to the model file.
+            device: CUDA device to use.
+            **kwargs: Additional arguments passed to the constructor.
+
+        Returns:
+            An instance of either AHOYv1 or AHOYv2 based on the model path.
+        """
+        if any(x in hor_det_weights.lower() for x in ("obb")):
+            return super().__new__(AHOYv2)
+        return super().__new__(AHOYv1)
 
     # Ensemble of models
     def __init__(
@@ -399,13 +421,11 @@ class AHOY(nn.Module):
         self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
     ):
         """Load horizon detection model."""
-        return HorizonModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
+        raise NotImplementedError("Subclasses should implement this method")
 
     def forward(self, x, profile=False, visualize=False):
         """Forward pass through models."""
-        objects = self.obj_det(x, profile, visualize)
-        pitch, theta = self.hor_det(x, profile, visualize)
-        return objects, pitch, theta
+        raise NotImplementedError("Subclasses should implement this method")
 
     def register_preprocessing_hook(self):
         """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
@@ -506,6 +526,34 @@ class AHOY(nn.Module):
     @staticmethod
     def _postprocessing_hook(module, inputs, outputs):
         """Convert outputs to float (if needed) and apply softmax to logits."""
+        raise NotImplementedError("Subclasses should implement this method")
+
+    def prepare_for_export(self, dynamic: bool = False):
+        """Prepare model for export."""
+        LOGGER.info(f"✨ Preparing {self.obj_det.__class__.__name__} for export...")
+        self.obj_det.prepare_for_export(dynamic)
+        LOGGER.info(f"✨ Preparing {self.hor_det.__class__.__name__} for export...")
+        self.hor_det.prepare_for_export(dynamic)
+
+
+class AHOYv1(AHOY):
+    """A H-orizon O-bject detection Y-OLOv5 (object detection with yolov5)."""
+
+    def load_hor_det(
+        self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
+    ):
+        """Load horizon detection model."""
+        return HorizonModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
+
+    def forward(self, x, profile=False, visualize=False):
+        """Forward pass through models."""
+        objects = self.obj_det(x, profile, visualize)
+        pitch, theta = self.hor_det(x, profile, visualize)
+        return objects, pitch, theta
+
+    @staticmethod
+    def _postprocessing_hook(module, inputs, outputs):
+        """Convert outputs to float (if needed) and apply softmax to logits."""
 
         def _to_float(x):
             return x.float() if module.fp16 else x
@@ -523,16 +571,9 @@ class AHOY(nn.Module):
         # Reconstruct the overall output
         return (first_tuple, _to_float(second_item), _to_float(third_item))
 
-    def prepare_for_export(self, dynamic: bool = False):
-        """Prepare model for export."""
-        LOGGER.info(f"✨ Preparing {self.obj_det.__class__.__name__} for export...")
-        self.obj_det.prepare_for_export(dynamic)
-        LOGGER.info(f"✨ Preparing {self.hor_det.__class__.__name__} for export...")
-        self.hor_det.prepare_for_export(dynamic)
 
-
-class AHOYOBB(AHOY):
-    """A H-orizon (with OBB) O-bject detection Y-OLOv5 (object detection with yolov5)."""
+class AHOYv2(AHOY):
+    """A H-orizon O-bject detection Y-OLOv5 (object detection with yolov5)."""
 
     def load_hor_det(
         self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
@@ -669,7 +710,10 @@ class Hydra(BaseModel):
 
         self.model = model.model
         self.model.to(self.device)
-        self.model.half() if fp16 else self.model.float()
+        if self.fp16:
+            self.model.half()
+        else:
+            self.model.float()
         self.save = model.save
         self.stride = model.stride
         self.nc = model.nc
@@ -742,13 +786,12 @@ class Hydra(BaseModel):
 
         return (x, x_pitch, x_theta)
 
-    def forward(self, x):
+    def forward(self, x, profile=False, visualize=False):
         if self.task == "detection":
-            return self._detect_once(x)
-        elif self.task == "horizon":
-            return self._horizon_once(x)
-        else:
-            return self._forward_once(x)
+            return self._detect_once(x, profile, visualize)
+        if self.task == "horizon":
+            return self._horizon_once(x, profile, visualize)
+        return self._forward_once(x, profile, visualize)
 
 
 def _find_cutoff(model):
