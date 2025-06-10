@@ -1,21 +1,23 @@
 from pathlib import Path
-from typing import Union
+from typing import Union, Tuple, Optional
 
 import numpy as np
 import torch
 from torch import nn
 from torchvision import transforms
-from ultralytics import YOLO
 
-from models.common import Classify, DetectMultiBackend
-from models.experimental import attempt_load
-from models.yolo import BaseModel, DetectionModel
-from utils.general import LOGGER
+from ultralytics import YOLO
+from ultralytics.nn.tasks import BaseModel as UBaseModel
+
+from utils.general import LOGGER, scale_boxes
 from utils.plots import feature_visualization
 from utils.torch_utils import select_device
+from models.common import Classify, DetectMultiBackend
+from models.experimental import attempt_load
+from models.yolo import BaseModel, DetectionModel, Detect
 
 
-class OBBModel(BaseModel):
+class OBBModel(UBaseModel):
     """Wrapper around yolo-OBB Model."""
 
     def __init__(
@@ -31,19 +33,49 @@ class OBBModel(BaseModel):
 
         if Path(weights).is_file() or weights.endswith(".pt"):
             model = YOLO(model=weights)
-            if fuse:
-                model.fuse()
-            model = model.model
-            stride = model.stride
             LOGGER.info(f"Loaded weights from {weights}")
         else:
             raise ValueError("model must be a path to a .pt file")
 
-        self.model = model.model
-        self.model.to(self.device)
-        self.model.half() if fp16 else self.model.float()
-        self.stride = stride
-        self.save = model.save
+        model.to(self.device)
+        if fuse:
+            model.fuse()
+        if fp16:
+            model.half()
+        else:
+            model.float()
+        self.names = model.names
+        self.stride = model.model.stride
+        self.save = model.model.save
+        self.model = model.model.model  # YOLO.OBBModel.Sequential
+
+    def prepare_for_export(self, dynamic: bool = False):
+        """Prepare model for export."""
+        from ultralytics.nn import modules  # import C2f, Classify, Detect, RTDETRDecoder
+
+        for p in self.model.parameters():
+            p.requires_grad = False
+        self.model.eval()
+
+        for m in self.model.modules():
+            if isinstance(m, modules.Classify):
+                m.export = True
+            if isinstance(
+                m, (modules.Detect, modules.RTDETRDecoder)
+            ):  # includes all Detect subclasses like Segment, Pose, OBB
+                m.dynamic = dynamic
+                m.export = True
+                m.format = "onnx"
+                m.max_det = 1000
+                m.xyxy = True  # self.args.nms and not coreml
+            elif isinstance(m, modules.C2f):
+                # EdgeTPU does not support FlexSplitV while split provides cleaner ONNX graph
+                m.forward = m.forward_split
+
+    def init_criterion(self):
+        """Initialize the loss criterion for the BaseModel."""
+        raise NotImplementedError("compute_loss() needs to be implemented by task heads")
+
 
 class HorizonModel(BaseModel):
     """YOLOv5 backbone + classification heads for pitch and theta."""
@@ -95,8 +127,10 @@ class HorizonModel(BaseModel):
 
         self.model = model.model
         self.model.to(self.device)
-      
-        self.model.half() if fp16 else self.model.float()
+        if fp16:
+            self.model.half()
+        else:
+            self.model.float()
         self.stride = stride
         self.save = model.save
 
@@ -256,6 +290,17 @@ class HorizonModel(BaseModel):
 
         return (mu_pitch, amp_pitch, sigma_pitch), (mu_theta, amp_theta, sigma_theta)
 
+    def prepare_for_export(self, dynamic: bool = False):
+        """Prepare model for export."""
+        self.model.eval()
+
+        # Update model
+        for _, m in self.model.named_modules():
+            if isinstance(m, Detect):
+                m.inplace = False
+                m.dynamic = dynamic
+                m.export = True
+
 
 class ObjectsModel(BaseModel):
     """Wrapper around YOLOv5 DetectionModel."""
@@ -281,15 +326,50 @@ class ObjectsModel(BaseModel):
 
         self.model = model.model
         self.model.to(self.device)
-        self.model.half() if fp16 else self.model.float()
+        if fp16:
+            self.model.half()
+        else:
+            self.model.float()
         self.stride = stride
         self.names = names
         self.save = model.save
 
+    def prepare_for_export(self, dynamic: bool = False):
+        """Prepare model for export."""
+        self.model.eval()
+
+        # Update model
+        for _, m in self.model.named_modules():
+            if isinstance(m, Detect):
+                m.inplace = False
+                m.dynamic = dynamic
+                m.export = True
 
 
 class AHOY(nn.Module):
-    """A H-orizon O-bject detection Y-OLOv5."""
+    """Base class for AHOY models.
+
+    AHOY Stands for the following:
+    - **A**
+    - **H**orizon and
+    - **O**bject detection
+    - **Y**olo-based model
+    """
+
+    def __new__(cls, hor_det_weights: str, **kwargs):
+        """Create the appropriate AHOY model instance based on the model path.
+
+        Args:
+            model_path: Path to the model file.
+            device: CUDA device to use.
+            **kwargs: Additional arguments passed to the constructor.
+
+        Returns:
+            An instance of either AHOYv1 or AHOYv2 based on the model path.
+        """
+        if any(x in hor_det_weights.lower() for x in ("obb")):
+            return super().__new__(AHOYv2)
+        return super().__new__(AHOYv1)
 
     # Ensemble of models
     def __init__(
@@ -299,31 +379,53 @@ class AHOY(nn.Module):
         device: Union[str, torch.device] = None,  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
-        imgsz: list = [640,640],
-        infsz: list = [640,640],
-        inplace: bool = True,  # inplace modification of models
+        imgsz: Tuple[int, int] = (640, 640),
+        infsz: Optional[Tuple[int, int]] = None,
     ):
         super().__init__()
-        self.obj_det = ObjectsModel(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
-        self.hor_det = HorizonModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
-        self.device = select_device(device)
+        self.obj_det = self.load_obj_det(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
+        self.hor_det = self.load_hor_det(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
+        self.device = self.obj_det.device
         self.fp16 = fp16
         self.stride = self.obj_det.stride
         self.names = self.obj_det.names
         self.imgsz = imgsz
-        self.infsz = infsz
+        self.infsz = infsz if infsz is not None else imgsz
 
         # keep track of hooks
         self.hooks = {}
 
         # Scaling in Padding Preprocessing
-        self.transform = self.get_transform(imgsz, infsz)
+        self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
+
+        LOGGER.debug(
+            f"Object detection model info: "
+            f"model.type={type(self.obj_det.model).__name__}, "
+            f"save={self.obj_det.save}, "
+            f"stride={self.obj_det.stride}"
+        )
+        LOGGER.debug(
+            f"Horizon detection model info: "
+            f"model.type={type(self.hor_det.model).__name__}, "
+            f"save={self.hor_det.save}, "
+            f"stride={self.hor_det.stride}"
+        )
+
+    def load_obj_det(
+        self, obj_det_weigths: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
+    ):
+        """Load object detection model."""
+        return ObjectsModel(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
+
+    def load_hor_det(
+        self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
+    ):
+        """Load horizon detection model."""
+        raise NotImplementedError("Subclasses should implement this method")
 
     def forward(self, x, profile=False, visualize=False):
         """Forward pass through models."""
-        objects = self.obj_det(x, profile, visualize)
-        pitch, theta = self.hor_det(x, profile, visualize)
-        return objects, pitch, theta
+        raise NotImplementedError("Subclasses should implement this method")
 
     def register_preprocessing_hook(self):
         """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
@@ -349,23 +451,39 @@ class AHOY(nn.Module):
         self.hooks.clear()
 
     @staticmethod
-    def get_transform(imgsz, infsz):
+    def get_transform(imgsz: Tuple[int, int], infsz: Optional[Tuple[int, int]] = None):
         """Get the transformation to be applied to the image. Padding and/or resize, if needed."""
-        if imgsz == infsz:
-            return None
+        if imgsz == infsz or infsz is None:
+            return None, None
 
         pad_left, pad_right, pad_top, pad_bottom = AHOY.get_padding_for_aspect_ratio(imgsz, infsz)
         ratio = max(imgsz[0] / infsz[0], imgsz[1] / infsz[1])
+        ratio_pad = [[1 / ratio], [pad_left, pad_top]]  # [[gain], [pad_x, pad_y]] for scale_boxes
         transform = transforms.Compose([])
         if ratio != 1:
             transform.transforms.extend(
-                [transforms.Resize((infsz[0]-pad_top-pad_bottom, infsz[1]-pad_left-pad_right), interpolation=transforms.InterpolationMode.NEAREST, antialias=False)]
+                [
+                    transforms.Resize(
+                        (
+                            infsz[0] - pad_top - pad_bottom,
+                            infsz[1] - pad_left - pad_right,
+                        ),
+                        interpolation=transforms.InterpolationMode.BILINEAR,
+                        antialias=False,
+                    )
+                ]
             )
         if pad_left != 0 or pad_right != 0 or pad_top != 0 or pad_bottom != 0:
             transform.transforms.extend(
-                [transforms.Pad(padding=(pad_left, pad_top, pad_right, pad_bottom), fill = 0, padding_mode="constant")]
+                [
+                    transforms.Pad(
+                        padding=(pad_left, pad_top, pad_right, pad_bottom),
+                        fill=0,
+                        padding_mode="constant",
+                    )
+                ]
             )
-        return transform
+        return transform, ratio_pad
 
     @staticmethod
     def get_padding_for_aspect_ratio(imgsz, infsz):
@@ -395,7 +513,7 @@ class AHOY(nn.Module):
         """Add preprocessing operations to be part of the model."""
 
         def _preprocess(x):
-            if len(x.shape) <1 :
+            if len(x.shape) < 1:
                 return x
             if module.transform is not None:
                 x = x.float()
@@ -409,12 +527,46 @@ class AHOY(nn.Module):
     @staticmethod
     def _postprocessing_hook(module, inputs, outputs):
         """Convert outputs to float (if needed) and apply softmax to logits."""
+        raise NotImplementedError("Subclasses should implement this method")
+
+    def prepare_for_export(self, dynamic: bool = False):
+        """Prepare model for export."""
+        LOGGER.info(f"✨ Preparing {self.obj_det.__class__.__name__} for export...")
+        self.obj_det.prepare_for_export(dynamic)
+        LOGGER.info(f"✨ Preparing {self.hor_det.__class__.__name__} for export...")
+        self.hor_det.prepare_for_export(dynamic)
+
+
+class AHOYv1(AHOY):
+    """A H-orizon O-bject detection Y-OLOv5 (object detection with yolov5)."""
+
+    def load_hor_det(
+        self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
+    ):
+        """Load horizon detection model."""
+        return HorizonModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
+
+    def forward(self, x, profile=False, visualize=False):
+        """Forward pass through models."""
+        objects = self.obj_det(x, profile, visualize)
+        pitch, theta = self.hor_det(x, profile, visualize)
+        return objects, pitch, theta
+
+    @staticmethod
+    def _postprocessing_hook(module, inputs, outputs):
+        """Convert outputs to float (if needed) and apply softmax to logits."""
 
         def _to_float(x):
             return x.float() if module.fp16 else x
 
         # ahoy outputs: (tuple(Tensor, ...), Tensor, Tensor)
         first_tuple, second_item, third_item = outputs
+
+        # Scale back boxes if transform was applied
+        if module.ratio_pad is not None:
+            first_tuple = (
+                scale_boxes(module.infsz, first_tuple[0], module.imgsz, ratio_pad=module.ratio_pad),
+            ) + first_tuple[1:]
 
         # Only convert the first item of the first tuple (the detection outputs)
         first_tuple = (_to_float(first_tuple[0]),) + first_tuple[1:]
@@ -427,37 +579,14 @@ class AHOY(nn.Module):
         return (first_tuple, _to_float(second_item), _to_float(third_item))
 
 
-class AHOYOBB(AHOY):
-    """A H-orizon (with OBB) O-bject detection Y-OLOv5 (object detection with yolov5)."""
+class AHOYv2(AHOY):
+    """A H-orizon O-bject detection Y-OLOv5 (object detection with yolov5)."""
 
-    # Ensemble of models
-    def __init__(
-        self,
-        obj_det_weigths: str,
-        hor_det_weights: str,
-        device: Union[str,
-                    torch.device] = None,  # automatically select device
-        fp16: bool = False,
-        fuse: bool = True,  # fuse conv and bn layers
-        imgsz: list = [640, 640],
-        infsz: list = [640, 640],
-        inplace: bool = True,  # inplace modification of models
+    def load_hor_det(
+        self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
     ):
-        nn.Module.__init__(self) 
-        self.obj_det = ObjectsModel(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
-        self.hor_det = OBBModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
-        self.device = select_device(device)
-        self.fp16 = fp16
-        self.stride = self.obj_det.stride
-        self.names = self.obj_det.names
-        self.imgsz = imgsz
-        self.infsz = infsz
-
-        # keep track of hooks
-        self.hooks = {}
-        print("🚀 AHOY model: yolov5 + yolo[v8|11]-obb")
-        # Scaling in Padding Preprocessing
-        self.transform = self.get_transform(imgsz, infsz)
+        """Load horizon detection model."""
+        return OBBModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
 
     def forward(self, x, profile=False, visualize=False):
         """Forward pass through models."""
@@ -472,14 +601,28 @@ class AHOYOBB(AHOY):
         def _to_float(x):
             return x.float() if module.fp16 else x
 
-        # ahoy outputs: (tuple(Tensor, ...), Tensor, Tensor)
-        first_tuple, second_tuple = outputs
+        # first_tuple: (tuple(Tensor, ...), Tensor)
+        # second_tuple: Tensor
+        first_tuple, second_item = outputs
+
+        # transpose to (batch_size, num_boxes, num_classes)
+        second_item = second_item.transpose(1, 2)
+
+        # Scale back boxes if transform was applied
+        if module.ratio_pad is not None:
+            first_tuple = (
+                scale_boxes(module.infsz, first_tuple[0], module.imgsz, ratio_pad=module.ratio_pad),
+            ) + first_tuple[1:]
+            second_item = scale_boxes(
+                module.infsz, second_item, module.imgsz, ratio_pad=module.ratio_pad, xywh=True, clip=False
+            )
 
         # Only convert the first item of the first tuple (the detection outputs)
-        first_tuple = (_to_float(first_tuple[0]), ) + first_tuple[1:]
-        second_tuple = (_to_float(second_tuple[0].transpose(1, 2)), ) 
+        first_tuple = (_to_float(first_tuple[0]),) + first_tuple[1:]
+        second_item = _to_float(second_item)
 
-        return (first_tuple, second_tuple)
+        return (first_tuple, second_item)
+
 
 class DAN(nn.Module):
     """
@@ -586,7 +729,10 @@ class Hydra(BaseModel):
 
         self.model = model.model
         self.model.to(self.device)
-        self.model.half() if fp16 else self.model.float()
+        if self.fp16:
+            self.model.half()
+        else:
+            self.model.float()
         self.save = model.save
         self.stride = model.stride
         self.nc = model.nc
@@ -659,13 +805,12 @@ class Hydra(BaseModel):
 
         return (x, x_pitch, x_theta)
 
-    def forward(self, x):
+    def forward(self, x, profile=False, visualize=False):
         if self.task == "detection":
-            return self._detect_once(x)
-        elif self.task == "horizon":
-            return self._horizon_once(x)
-        else:
-            return self._forward_once(x)
+            return self._detect_once(x, profile, visualize)
+        if self.task == "horizon":
+            return self._horizon_once(x, profile, visualize)
+        return self._forward_once(x, profile, visualize)
 
 
 def _find_cutoff(model):

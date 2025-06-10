@@ -1,5 +1,5 @@
 """
-Export AHOY or AHOYOBB(with Horizon-OBB) to ONNX format.
+Export AHOY to ONNX format.
 
 ONNX is an open standard for machine learning models that enables interoperability 
 between different frameworks and platforms.
@@ -34,17 +34,14 @@ NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 """
 
 import argparse
-import logging
 from pathlib import Path
 from typing import List, Tuple
 
 import torch
 
 from export import export_onnx, export_onnx_trt7_compatible
-from models.custom import AHOY, AHOYOBB
-from models.yolo import Detect
-
-logging.basicConfig(level=logging.INFO)
+from models.custom import AHOY
+from utils.general import LOGGER
 
 
 def get_weights_path(weights_path: str) -> str:
@@ -62,7 +59,7 @@ def get_weights_path(weights_path: str) -> str:
     try:
         import wandb
     except ImportError:
-        logging.error("Please install wandb to download models from W&B registry")
+        LOGGER.error("Please install wandb to download models from W&B registry")
         return weights_path
 
     try:
@@ -71,11 +68,11 @@ def get_weights_path(weights_path: str) -> str:
 
         api = wandb.Api()
         artifact_name = f"wandb-registry-{REGISTRY}/{collection}:{version}"
-        artifact_path = api.artifact(name=artifact_name).download()
-        return next(Path(artifact_path).glob("*.pt"))
+        artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
+        return str(next(Path(artifact_path).glob("*.pt")))
 
     except Exception as e:
-        logging.error(f"Failed to download from W&B: {str(e)}")
+        LOGGER.error(f"Failed to download from W&B: {str(e)}")
         raise e
 
 
@@ -110,6 +107,8 @@ def main(
     batch_size: int,
     half: bool,
     fuse: bool,
+    dynamic: bool = False,
+    simplify: bool = False,
     trt7_compatible: bool = False,
     fname: str = "",
 ):
@@ -120,8 +119,7 @@ def main(
     det_weights = get_weights_path(det_weights)
     hor_weights = get_weights_path(hor_weights)
 
-    model_class = AHOYOBB if "obb" in hor_weights.lower() else AHOY
-    model = model_class(
+    model = AHOY(
         obj_det_weigths=det_weights,
         hor_det_weights=hor_weights,
         fp16=half,
@@ -133,39 +131,28 @@ def main(
     if not fname:
         input_size = f"{imgsz[0]}x{imgsz[1]}"
         fname = f"{type(model).__name__.lower()}_b{batch_size}_sz{input_size}.onnx"
-    print(f"🚀 Exporting model {type(model).__name__} to {fname}...")
+    LOGGER.info(f"🚀 Exporting model {type(model).__name__} to {fname}...")
 
-    inplace = False  # default
-    dynamic = False  # default
-
-    # Update model
-    model.eval()
-    print("✨ Preparing the model for export...")
-    for _, m in model.named_modules():
-        if isinstance(m, Detect):
-            m.inplace = inplace
-            m.dynamic = dynamic
-            m.export = True
+    model.prepare_for_export(dynamic=dynamic)
     model.register_io_hooks()  # inp: uint8 -> fp32/fp16 / 255.0, out: fp16 -> fp32
 
     # Create dummy input
     image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte()  # B, C, H, W
     # https://github.com/NVIDIA/TensorRT/issues/3026#issuecomment-1570419758
     image = image.float() if trt7_compatible else image
-    print(f"🔮 Dummy input...{image.shape}, {image.dtype}")
+    LOGGER.info(f"🔮 Dummy input...{image.shape}, {image.dtype}")
 
     model(image)  # need to run once to get the model to JIT compile
 
     export_func = export_onnx_trt7_compatible if trt7_compatible else export_onnx
-    f, _ = export_func(
+    _ = export_func(
         model,
         im=image,
         file=Path(fname),
         dynamic=dynamic,
-        simplify=False,
+        simplify=simplify,
         opset=12,
     )
-    print(f"🎉 Model successfully exported to {f}! 🚀")
 
 
 def _parse_args():
@@ -210,6 +197,12 @@ def _parse_args():
         "--half",
         action="store_true",
         help="Export half-precision model.",
+    )
+    parser.add_argument(
+        "-si",
+        "--simplify",
+        action="store_true",
+        help="Simplify the exported model.",
     )
     parser.add_argument(
         "-trt7",
