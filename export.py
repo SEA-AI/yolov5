@@ -331,7 +331,7 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
     check_requirements("onnx>=1.12.0")
     import onnx
 
-    from models.custom import AHOY, AHOYv1, AHOYv2, DAN
+    from models.custom import AHOY, DAN, AHOYv1, AHOYv2
 
     LOGGER.info(f"\n{prefix} starting export with onnx {onnx.__version__}...")
     f = str(file.with_suffix(".onnx"))
@@ -383,12 +383,19 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
         d = {
             "stride": [int(max(model.model_a.stride)), int(max(model.model_b.stride))],
             "names": [model.model_a.names, model.model_b.names],
+            "inference-size": [model.model_a.infsz, model.model_b.infsz],
+            "image-size": [model.model_a.imgsz, model.model_b.imgsz]
         }
     else:
-        d = {"stride": int(max(model.stride)), "names": model.names}
-    for k, v in d.items():
+        d = {"stride": int(max(model.stride)), 
+             "names": model.names,
+             "inference-size": getattr(model, "infsz", None),
+             "image-size": getattr(model, "imgsz", None)}
+        
+    for k, v in {k: v for k, v in d.items() if v}.items():
         meta = model_onnx.metadata_props.add()
         meta.key, meta.value = k, str(v)
+        LOGGER.info(f"{meta.key}: {meta.value}")
     onnx.save(model_onnx, f)
 
     # Simplify
