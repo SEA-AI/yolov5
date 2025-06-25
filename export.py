@@ -395,7 +395,6 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
     for k, v in {k: v for k, v in d.items() if v}.items():
         meta = model_onnx.metadata_props.add()
         meta.key, meta.value = k, str(v)
-        LOGGER.info(f"{meta.key}: {meta.value}")
     onnx.save(model_onnx, f)
 
     # Simplify
