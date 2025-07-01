@@ -60,6 +60,8 @@ import pandas as pd
 import torch
 from torch.utils.mobile_optimizer import optimize_for_mobile
 
+from utils.torch_utils import get_resize_info
+
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -380,17 +382,23 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
 
     # Metadata
     if isinstance(model, DAN):
+
+        resize_info = [get_resize_info(model.model_a), get_resize_info(model_or_transform=model.model_b)]
+
         d = {
             "stride": [int(max(model.model_a.stride)), int(max(model.model_b.stride))],
             "names": [model.model_a.names, model.model_b.names],
-            "inference-size": [model.model_a.infsz, model.model_b.infsz],
-            "image-size": [model.model_a.imgsz, model.model_b.imgsz]
+            "resize": resize_info if any(resize_info) else None
+
         }
+        
     else:
-        d = {"stride": int(max(model.stride)), 
-             "names": model.names,
-             "inference-size": getattr(model, "infsz", None),
-             "image-size": getattr(model, "imgsz", None)}
+        
+        d = {
+            "stride": int(max(model.stride)),
+            "names": model.names,
+            "resize": get_resize_info(model)
+        }
         
     for k, v in {k: v for k, v in d.items() if v}.items():
         meta = model_onnx.metadata_props.add()
