@@ -16,6 +16,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torchvision.transforms import Resize
 
 from utils.general import LOGGER, check_version, colorstr, file_date, git_describe
 
@@ -482,3 +483,22 @@ class ModelEMA:
         default.
         """
         copy_attr(self.ema, model, include, exclude)
+
+
+def get_resize_info(model_or_transform):
+    """
+    Extracts resize information (height and width) from a model's transform 
+    or a standalone transform object.
+    """
+    transforms = getattr(model_or_transform, "transform", None)
+    resize_transform = next((t for t in getattr(transforms, "transforms", []) if isinstance(t, Resize)), None)
+
+    if not resize_transform:
+        return {}
+
+    return {
+        "height": resize_transform.size[0],
+        "width": resize_transform.size[1],
+        "interpolation": resize_transform.interpolation.name.lower(),
+        "antialias": resize_transform.antialias
+    }

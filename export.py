@@ -60,6 +60,8 @@ import pandas as pd
 import torch
 from torch.utils.mobile_optimizer import optimize_for_mobile
 
+from utils.torch_utils import get_resize_info
+
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -331,7 +333,7 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
     check_requirements("onnx>=1.12.0")
     import onnx
 
-    from models.custom import AHOY, AHOYv1, AHOYv2, DAN
+    from models.custom import AHOY, DAN, AHOYv1, AHOYv2
 
     LOGGER.info(f"\n{prefix} starting export with onnx {onnx.__version__}...")
     f = str(file.with_suffix(".onnx"))
@@ -380,13 +382,25 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
 
     # Metadata
     if isinstance(model, DAN):
+
+        resize_info = [get_resize_info(model.model_a), get_resize_info(model_or_transform=model.model_b)]
+
         d = {
             "stride": [int(max(model.model_a.stride)), int(max(model.model_b.stride))],
             "names": [model.model_a.names, model.model_b.names],
+            "resize": resize_info if any(resize_info) else None
+
         }
+        
     else:
-        d = {"stride": int(max(model.stride)), "names": model.names}
-    for k, v in d.items():
+        
+        d = {
+            "stride": int(max(model.stride)),
+            "names": model.names,
+            "resize": get_resize_info(model)
+        }
+        
+    for k, v in {k: v for k, v in d.items() if v}.items():
         meta = model_onnx.metadata_props.add()
         meta.key, meta.value = k, str(v)
     onnx.save(model_onnx, f)
