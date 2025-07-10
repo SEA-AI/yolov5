@@ -897,13 +897,14 @@ class LoadImagesAndLabels(Dataset):
         """
         im, (h0, w0), (h, w) = self.load_image(i)
         labels, segments = self.labels[i].copy(), self.segments[i].copy()
-        if labels.size:
-            labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h)
-            segments = [xyn2xy(x, w, h) for x in segments]
 
         if self.pre_augment:
             im, labels = self.pre_albumentations(im, labels, p=1.0, p_crop=0.8)
             # do we need to update the segments?
+
+        if labels.size:
+            labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h)
+            segments = [xyn2xy(x, w, h) for x in segments]
         
         return im, (h0, w0), (h, w), labels, segments
 
