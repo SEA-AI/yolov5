@@ -39,7 +39,7 @@ class Albumentations:
                 A.CLAHE(p=0.01),
                 A.RandomBrightnessContrast(p=0.0),
                 A.RandomGamma(p=0.0),
-                A.ImageCompression(quality_lower=50, p=im_compression_prob),
+                A.ImageCompression(p=im_compression_prob, quality_lower=50),
             ]  # transforms
             self.transform = A.Compose(T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]))
 
@@ -56,6 +56,57 @@ class Albumentations:
             im, labels = new["image"], np.array([[c, *b] for c, b in zip(new["class_labels"], new["bboxes"])])
         return im, labels
 
+
+class PreAlbumentations:
+    """Provides optional data augmentation for YOLOv5 using Albumentations library if installed."""
+
+    def __init__(self, size=640, im_compression_prob=0.9):
+        """Initializes Albumentations class for optional data augmentation in YOLOv5 with specified input size and image compression probability."""
+        self.transform = None
+        self.size = size
+        prefix = colorstr("pre-albumentations: ")
+        try:
+            import albumentations as A
+
+            check_version(A.__version__, "1.0.3", hard=True)  # version requirement
+            T = [
+                A.NoOp()
+            ]  # transforms
+            self.transform = A.Compose(T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]))
+
+            LOGGER.info(prefix + ", ".join(f"{x}".replace("always_apply=False, ", "") for x in T if x.p))
+        except ImportError:  # package not installed, skip
+            pass
+        except Exception as e:
+            LOGGER.info(f"{prefix}{e}")
+
+    def __call__(self, im, labels, p=1.0, crop_p=0.8):
+        """Applies transformations to an image and labels with probability `p`, returning updated image and labels.
+        
+        Args:
+            im (np.ndarray): The image.
+            labels (np.ndarray): The labels.
+            p (float): The probability of applying the transform.
+            crop_p (float): The probability of applying a RandomCrop before the rest of the transforms.
+
+        Returns:
+            im (np.ndarray): The image.
+            labels (np.ndarray): The labels.
+        """
+        if self.transform and random.random() < p:
+            import albumentations as A
+
+            im_h, im_w = im.shape[:2]
+            transform = A.Compose(
+                [
+                    A.RandomCrop(p=crop_p, height=min(self.size, im_h), width=min(self.size, im_w)),
+                    *self.transform.transforms,
+                ],
+                bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]),
+            )
+            new = transform(image=im, bboxes=labels[:, 1:], class_labels=labels[:, 0])  # transformed
+            im, labels = new["image"], np.array([[c, *b] for c, b in zip(new["class_labels"], new["bboxes"])])
+        return im, labels
 
 def normalize(x, mean=IMAGENET_MEAN, std=IMAGENET_STD, inplace=False):
     """
