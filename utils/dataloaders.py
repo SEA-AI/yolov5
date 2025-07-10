@@ -581,7 +581,7 @@ class LoadImagesAndLabels(Dataset):
         self.stride = stride
         self.path = path
         self.albumentations = Albumentations(size=img_size, im_compression_prob=im_compression_prob) if augment else None
-        self.pre_albumentations = PreAlbumentations(size=img_size) if augment else None
+        self.pre_albumentations = PreAlbumentations(size=img_size) if pre_augment else None
         
         try:
             f = []  # image files
@@ -902,7 +902,7 @@ class LoadImagesAndLabels(Dataset):
             segments = [xyn2xy(x, w, h) for x in segments]
 
         if self.pre_augment:
-            img, labels = self.pre_albumentations(img, labels, p=1.0, p_crop=0.8)
+            im, labels = self.pre_albumentations(im, labels, p=1.0, p_crop=0.8)
             # do we need to update the segments?
         
         return im, (h0, w0), (h, w), labels, segments
