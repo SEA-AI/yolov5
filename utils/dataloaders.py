@@ -805,6 +805,9 @@ class LoadImagesAndLabels(Dataset):
             img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
+            if labels.size:  # normalized xywh to pixel xyxy format
+                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+
             if self.augment:
                 img, labels = random_perspective(
                     img,
@@ -911,11 +914,7 @@ class LoadImagesAndLabels(Dataset):
             im = cv2.resize(im, (math.ceil(w0 * r), math.ceil(h0 * r)), interpolation=interp)
             (h, w) = im.shape[:2]
 
-        if labels.size:
-            labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h)
-            segments = [xyn2xy(x, w, h) for x in segments]
-        else:
-            labels = np.empty((0, labels_shape[1]))
+        labels = np.empty((0, labels_shape[1])) if not labels.size else labels
         
         return im, (h0, w0), (h, w), labels, segments
 
@@ -954,6 +953,10 @@ class LoadImagesAndLabels(Dataset):
             img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
             padw = x1a - x1b
             padh = y1a - y1b
+
+            if labels.size:
+                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h)
+                segments = [xyn2xy(x, w, h) for x in segments]
 
             # Labels
             labels4.append(labels)
@@ -1020,6 +1023,9 @@ class LoadImagesAndLabels(Dataset):
             x1, y1, x2, y2 = (max(x, 0) for x in c)  # allocate coords
 
             # Labels
+            if labels.size:
+                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padx, pady)  # normalized xywh to pixel xyxy format
+                segments = [xyn2xy(x, w, h, padx, pady) for x in segments]
             labels9.append(labels)
             segments9.extend(segments)
 
