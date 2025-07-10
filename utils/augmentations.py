@@ -102,7 +102,7 @@ class PreAlbumentations:
                     A.RandomCrop(p=p_crop, height=min(self.size, im_h), width=min(self.size, im_w)),
                     *self.transform.transforms,
                 ],
-                bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]),
+                bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"], clip=True),
             )
             new = transform(image=im, bboxes=labels[:, 1:], class_labels=labels[:, 0])  # transformed
             im, labels = new["image"], np.array([[c, *b] for c, b in zip(new["class_labels"], new["bboxes"])])

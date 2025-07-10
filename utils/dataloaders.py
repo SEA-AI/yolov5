@@ -700,7 +700,7 @@ class LoadImagesAndLabels(Dataset):
         if cache_images:
             b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
             self.im_hw0, self.im_hw = [None] * n, [None] * n
-            fcn = self.cache_images_to_disk if cache_images == "disk" else self.load_image
+            fcn = self.cache_images_to_disk if cache_images == "disk" else self.load_image_and_labels
             with ThreadPool(NUM_THREADS) as pool:
                 results = pool.imap(lambda i: (i, fcn(i)), self.indices)
                 pbar = tqdm(results, total=len(self.indices), bar_format=TQDM_BAR_FORMAT, disable=LOCAL_RANK > 0)
@@ -708,7 +708,7 @@ class LoadImagesAndLabels(Dataset):
                     if cache_images == "disk":
                         b += self.npy_files[i].stat().st_size
                     else:  # 'ram'
-                        self.ims[i], self.im_hw0[i], self.im_hw[i] = x  # im, hw_orig, hw_resized = load_image(self, i)
+                        self.ims[i], self.im_hw0[i], self.im_hw[i], _, _ = x  # im, hw_orig, hw_resized = load_image(self, i)
                         b += self.ims[i].nbytes * WORLD_SIZE
                     pbar.desc = f"{prefix}Caching images ({b / gb:.1f}GB {cache_images})"
                 pbar.close()
@@ -854,7 +854,7 @@ class LoadImagesAndLabels(Dataset):
 
         return torch.from_numpy(img), labels_out, self.im_files[index], shapes
 
-    def load_image(self, i):
+    def load_image(self, i, resize=True):
         """
         Loads an image by index, returning the image, its original dimensions, and resized dimensions.
 
@@ -875,7 +875,7 @@ class LoadImagesAndLabels(Dataset):
             # add random croping here which also modifies the labels
             h0, w0 = im.shape[:2]  # orig hw
             r = self.img_size / max(h0, w0)  # ratio
-            if r != 1:  # if sizes are not equal
+            if r != 1 and resize:  # if sizes are not equal
                 interp = cv2.INTER_LINEAR if (self.augment or r > 1) else cv2.INTER_AREA
                 im = cv2.resize(im, (math.ceil(w0 * r), math.ceil(h0 * r)), interpolation=interp)
             return im, (h0, w0), im.shape[:2]  # im, hw_original, hw_resized
@@ -895,16 +895,27 @@ class LoadImagesAndLabels(Dataset):
             labels (np.ndarray): The labels.
             segments (list): The segments.
         """
-        im, (h0, w0), (h, w) = self.load_image(i)
+        im, (h0, w0), (h, w) = self.load_image(i, resize=False)
+
         labels, segments = self.labels[i].copy(), self.segments[i].copy()
+        labels_shape = labels.shape
 
         if self.pre_augment:
             im, labels = self.pre_albumentations(im, labels, p=1.0, p_crop=0.8)
+            (h0, w0) = (h, w) = im.shape[:2]
             # do we need to update the segments?
+
+        r = self.img_size / max(h0, w0)  # ratio
+        if r != 1:  # if sizes are not equal
+            interp = cv2.INTER_LINEAR if (self.augment or r > 1) else cv2.INTER_AREA
+            im = cv2.resize(im, (math.ceil(w0 * r), math.ceil(h0 * r)), interpolation=interp)
+            (h, w) = im.shape[:2]
 
         if labels.size:
             labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h)
             segments = [xyn2xy(x, w, h) for x in segments]
+        else:
+            labels = np.empty((0, labels_shape[1]))
         
         return im, (h0, w0), (h, w), labels, segments
 
