@@ -80,7 +80,7 @@ class PreAlbumentations:
         except Exception as e:
             LOGGER.info(f"{prefix}{e}")
 
-    def __call__(self, im, labels, p=1.0, crop_p=0.8):
+    def __call__(self, im, labels, p=1.0, p_crop=0.8):
         """Applies transformations to an image and labels with probability `p`, returning updated image and labels.
         
         Args:
@@ -99,7 +99,7 @@ class PreAlbumentations:
             im_h, im_w = im.shape[:2]
             transform = A.Compose(
                 [
-                    A.RandomCrop(p=crop_p, height=min(self.size, im_h), width=min(self.size, im_w)),
+                    A.RandomCrop(p=p_crop, height=min(self.size, im_h), width=min(self.size, im_w)),
                     *self.transform.transforms,
                 ],
                 bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]),
