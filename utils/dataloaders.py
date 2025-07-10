@@ -28,6 +28,7 @@ from tqdm import tqdm
 
 from utils.augmentations import (
     Albumentations,
+    PreAlbumentations,
     augment_hsv,
     classify_albumentations,
     classify_transforms,
@@ -178,6 +179,7 @@ def create_dataloader(
     shuffle=False,
     seed=0,
     im_compression_prob=0.9,
+    pre_augment=False,
 ):
     """Creates and returns a configured DataLoader instance for loading and processing image datasets."""
     if rect and shuffle:
@@ -199,6 +201,7 @@ def create_dataloader(
             prefix=prefix,
             rank=rank,
             im_compression_prob=im_compression_prob,
+            pre_augment=pre_augment,
         )
 
     batch_size = min(batch_size, len(dataset))
@@ -564,10 +567,12 @@ class LoadImagesAndLabels(Dataset):
         rank=-1,
         seed=0,
         im_compression_prob=0.9,
+        pre_augment=False,
     ):
         """Initializes the YOLOv5 dataset loader, handling images and their labels, caching, and preprocessing."""
         self.img_size = img_size
         self.augment = augment
+        self.pre_augment = pre_augment
         self.hyp = hyp
         self.image_weights = image_weights
         self.rect = False if image_weights else rect
@@ -576,7 +581,8 @@ class LoadImagesAndLabels(Dataset):
         self.stride = stride
         self.path = path
         self.albumentations = Albumentations(size=img_size, im_compression_prob=im_compression_prob) if augment else None
-
+        self.pre_albumentations = PreAlbumentations(size=img_size) if augment else None
+        
         try:
             f = []  # image files
             for p in path if isinstance(path, list) else [path]:
@@ -792,16 +798,12 @@ class LoadImagesAndLabels(Dataset):
 
         else:
             # Load image
-            img, (h0, w0), (h, w) = self.load_image(index)
+            img, (h0, w0), (h, w), labels, _ = self.load_image_and_labels(index)
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
             img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
-
-            labels = self.labels[index].copy()
-            if labels.size:  # normalized xywh to pixel xyxy format
-                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
 
             if self.augment:
                 img, labels = random_perspective(
@@ -870,6 +872,7 @@ class LoadImagesAndLabels(Dataset):
                 # im = cv2.imread(f)  # BGR
                 im = imread_16bit_compatible(f, augment16=self.augment)  # BGR
                 assert im is not None, f"Image Not Found {f}"
+            # add random croping here which also modifies the labels
             h0, w0 = im.shape[:2]  # orig hw
             r = self.img_size / max(h0, w0)  # ratio
             if r != 1:  # if sizes are not equal
@@ -877,6 +880,32 @@ class LoadImagesAndLabels(Dataset):
                 im = cv2.resize(im, (math.ceil(w0 * r), math.ceil(h0 * r)), interpolation=interp)
             return im, (h0, w0), im.shape[:2]  # im, hw_original, hw_resized
         return self.ims[i], self.im_hw0[i], self.im_hw[i]  # im, hw_original, hw_resized
+    
+    def load_image_and_labels(self, i: int) -> tuple[np.ndarray, tuple[int, int], tuple[int, int], np.ndarray]:
+        """
+        Loads an image by index, returning the image, its dimensions, and the labels.
+
+        Args:
+            i (int): Index of the image to load.
+
+        Returns:
+            im (np.ndarray): The image.
+            (h0, w0) (tuple): The original dimensions of the image.
+            (h, w) (tuple): The resized dimensions of the image.
+            labels (np.ndarray): The labels.
+            segments (list): The segments.
+        """
+        im, (h0, w0), (h, w) = self.load_image(i)
+        labels, segments = self.labels[i].copy(), self.segments[i].copy()
+        if labels.size:
+            labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h)
+            segments = [xyn2xy(x, w, h) for x in segments]
+
+        if self.pre_augment:
+            img, labels = self.pre_albumentations(img, labels, p=1.0, p_crop=0.8)
+            # do we need to update the segments?
+        
+        return im, (h0, w0), (h, w), labels, segments
 
     def cache_images_to_disk(self, i):
         """Saves an image to disk as an *.npy file for quicker loading, identified by index `i`."""
@@ -893,7 +922,7 @@ class LoadImagesAndLabels(Dataset):
         random.shuffle(indices)
         for i, index in enumerate(indices):
             # Load image
-            img, _, (h, w) = self.load_image(index)
+            img, _, (h, w), labels, segments = self.load_image_and_labels(index)
 
             # place img in img4
             if i == 0:  # top left
@@ -915,10 +944,6 @@ class LoadImagesAndLabels(Dataset):
             padh = y1a - y1b
 
             # Labels
-            labels, segments = self.labels[index].copy(), self.segments[index].copy()
-            if labels.size:
-                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
-                segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
             labels4.append(labels)
             segments4.extend(segments)
 
@@ -955,7 +980,7 @@ class LoadImagesAndLabels(Dataset):
         hp, wp = -1, -1  # height, width previous
         for i, index in enumerate(indices):
             # Load image
-            img, _, (h, w) = self.load_image(index)
+            img, _, (h, w), labels, segments = self.load_image_and_labels(index)
 
             # place img in img9
             if i == 0:  # center
@@ -983,10 +1008,6 @@ class LoadImagesAndLabels(Dataset):
             x1, y1, x2, y2 = (max(x, 0) for x in c)  # allocate coords
 
             # Labels
-            labels, segments = self.labels[index].copy(), self.segments[index].copy()
-            if labels.size:
-                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padx, pady)  # normalized xywh to pixel xyxy format
-                segments = [xyn2xy(x, w, h, padx, pady) for x in segments]
             labels9.append(labels)
             segments9.extend(segments)
 
