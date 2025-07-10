@@ -302,7 +302,8 @@ def train(hyp, opt, device, callbacks):
         prefix=colorstr("train: "),
         shuffle=True,
         seed=opt.seed,
-        im_compression_prob = im_compression_prob
+        im_compression_prob=im_compression_prob,
+        pre_augment=opt.pre_augment,
     )
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
@@ -616,6 +617,7 @@ def parse_opt(known=False):
 
     # introduce compression artifacts (value from 0 to 1.0)
     parser.add_argument("--im-compression-prob", type=float, default=0.9, help="Image compression probability (data Augmentation). 0 to disable")
+    parser.add_argument("--pre-augment", action="store_true", help="Apply pre-augmentation to the data")
 
     # Logger arguments
     parser.add_argument("--entity", default=None, help="Entity")
