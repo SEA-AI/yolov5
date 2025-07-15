@@ -111,6 +111,7 @@ def main(
     simplify: bool = False,
     trt7_compatible: bool = False,
     fname: str = "",
+    order = "BCHW",
 ):
     """Export the model to TensorRT engine."""
     # Transform image size to (height, width) format
@@ -126,6 +127,7 @@ def main(
         fuse=fuse,
         imgsz=imgsz,
         infsz=infsz,
+        order=order,
     )
 
     if not fname:
@@ -137,11 +139,18 @@ def main(
     model.register_io_hooks()  # inp: uint8 -> fp32/fp16 / 255.0, out: fp16 -> fp32
 
     # Create dummy input
-    image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte()  # B, C, H, W
+    if order == "BCHW":
+        image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte()  # B, C, H, W
+    elif order == "BHWC":
+        image = torch.zeros((batch_size, imgsz[0], imgsz[1], 3), device=model.device).byte()  # B, H, W, C
+    else:
+        raise ValueError(f"Unknown order: {order}, must be 'BCHW' or 'BHWC'")
+    
     # https://github.com/NVIDIA/TensorRT/issues/3026#issuecomment-1570419758
     image = image.float() if trt7_compatible else image
     LOGGER.info(f"🔮 Dummy input...{image.shape}, {image.dtype}")
 
+    print("EXPORT AHOY", image.shape)
     model(image)  # need to run once to get the model to JIT compile
 
     export_func = export_onnx_trt7_compatible if trt7_compatible else export_onnx
@@ -216,6 +225,13 @@ def _parse_args():
         type=str,
         default="",
         help="Filename for the exported model.",
+    )
+    parser.add_argument(
+        "--order",
+        type=str,
+        default="BCHW",
+        choices=["BCHW", "BHWC"],
+        help="Order of the input tensors.",
     )
     return parser.parse_args()
 

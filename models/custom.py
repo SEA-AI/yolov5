@@ -381,6 +381,7 @@ class AHOY(nn.Module):
         fuse: bool = True,  # fuse conv and bn layers
         imgsz: Tuple[int, int] = (640, 640),
         infsz: Optional[Tuple[int, int]] = None,
+        order: str = "BCHW",
     ):
         super().__init__()
         self.obj_det = self.load_obj_det(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
@@ -391,6 +392,7 @@ class AHOY(nn.Module):
         self.names = self.obj_det.names
         self.imgsz = imgsz
         self.infsz = infsz if infsz is not None else imgsz
+        self.order = self.check_order(order)
 
         # keep track of hooks
         self.hooks = {}
@@ -410,6 +412,11 @@ class AHOY(nn.Module):
             f"save={self.hor_det.save}, "
             f"stride={self.hor_det.stride}"
         )
+
+    def check_order(self, order: str):
+        if order not in ("BCHW", "BHWC"):
+            raise NotImplementedError("Only BCHW order is supported")
+        return order
 
     def load_obj_det(
         self, obj_det_weigths: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
@@ -511,18 +518,30 @@ class AHOY(nn.Module):
     @staticmethod
     def _preprocessing_hook(module, inputs):
         """Add preprocessing operations to be part of the model."""
+        
+        def _to_float(x):
+            if len(x.shape) < 1:
+                return x
+            x = x.float()
+            return x
+            
+        def _reorder(x):
+            if len(x.shape) < 1:
+                return x
+            if module.order == "BHWC":
+                x = x.permute(0, 3, 1, 2)
+            return x
 
         def _preprocess(x):
             if len(x.shape) < 1:
                 return x
             if module.transform is not None:
-                x = x.float()
                 x = module.transform(x)
             x = x.half() if module.fp16 else x.float()
             x = x / 255.0  # 0-255 to 0.0-1.0
             return x
 
-        return tuple(_preprocess(inp) for inp in inputs)
+        return tuple(_preprocess(_reorder(_to_float(inp))) for inp in inputs)
 
     @staticmethod
     def _postprocessing_hook(module, inputs, outputs):
