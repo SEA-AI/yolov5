@@ -384,7 +384,12 @@ def plot_mc_curve(px, py, save_dir=Path("mc_curve.png"), names=(), xlabel="Confi
 
     if 0 < len(names) < 21:  # display per-class legend if < 21 classes
         for i, y in enumerate(py):
-            ax.plot(px, y, linewidth=1, label=f"{names[i]}")  # plot(confidence, metric)
+
+            y_smooth = smooth(y, 0.05)
+            best_idx = y_smooth.argmax()
+            best_metric = y_smooth[best_idx]
+            best_conf = px[best_idx]
+            ax.plot(px, y, linewidth=1, label= f"{names[i]} {best_metric:.2f} at {best_conf:.2f}")  # plot(confidence, metric)
     else:
         ax.plot(px, py.T, linewidth=1, color="grey")  # plot(confidence, metric)
 
