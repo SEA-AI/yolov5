@@ -87,6 +87,25 @@ def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir=".", names
         plot_mc_curve(px, p, Path(save_dir) / f"{prefix}P_curve.png", names, ylabel="Precision")
         plot_mc_curve(px, r, Path(save_dir) / f"{prefix}R_curve.png", names, ylabel="Recall")
 
+
+    # Save metrics to pickle
+    if save_dir:
+        import pickle
+
+        pkl_data = {
+            "px": px,
+            "py": py,
+            "ap": ap,
+            "names": names,
+            "precision": p,
+            "recall": r,
+            "f1": f1
+        }
+
+        pkl_path = save_dir / "metrics.pkl"
+        with open(pkl_path, "wb") as f:
+            pickle.dump(pkl_data, f)
+
     i = smooth(f1.mean(0), 0.1).argmax()  # max F1 index
     p, r, f1 = p[:, i], r[:, i], f1[:, i]
     tp = (r * nt).round()  # true positives
