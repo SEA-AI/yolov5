@@ -90,7 +90,7 @@ def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir=".", names
             save_metrics_dashboard(px, py, ap, names, p, r, f1, save_dir)
         except ImportError:
             from utils.general import LOGGER, colorstr
-            LOGGER.warning(colorstr("metrics: ") + "Plotly is not installed, skipping metrics dashboard")
+            LOGGER.warning(colorstr("metrics: ") + "⚠️ Plotly is not installed, skipping metrics dashboard")
 
     # Save metrics to pickle
     if save_dir:
