@@ -86,25 +86,14 @@ def ap_per_class(tp, conf, pred_cls, target_cls, plot=False, save_dir=".", names
         plot_mc_curve(px, f1, Path(save_dir) / f"{prefix}F1_curve.png", names, ylabel="F1")
         plot_mc_curve(px, p, Path(save_dir) / f"{prefix}P_curve.png", names, ylabel="Precision")
         plot_mc_curve(px, r, Path(save_dir) / f"{prefix}R_curve.png", names, ylabel="Recall")
-
+        try:
+            save_metrics_dashboard(px, py, ap, names, p, r, f1, save_dir)
+        except ImportError:
+            pass
 
     # Save metrics to pickle
     if save_dir:
-        import pickle
-
-        pkl_data = {
-            "px": px,
-            "py": py,
-            "ap": ap,
-            "names": names,
-            "precision": p,
-            "recall": r,
-            "f1": f1
-        }
-
-        pkl_path = save_dir / "metrics.pkl"
-        with open(pkl_path, "wb") as f:
-            pickle.dump(pkl_data, f)
+        save_metrics_to_pickle(px, py, ap, names, p, r, f1, save_dir)
 
     i = smooth(f1.mean(0), 0.1).argmax()  # max F1 index
     p, r, f1 = p[:, i], r[:, i], f1[:, i]
@@ -403,3 +392,93 @@ def plot_mc_curve(px, py, save_dir=Path("mc_curve.png"), names=(), xlabel="Confi
     ax.set_title(f"{ylabel}-Confidence Curve")
     fig.savefig(save_dir, dpi=250)
     plt.close(fig)
+
+
+def save_metrics_to_pickle(px, py, ap, names, p, r, f1, save_dir):
+    """Save metrics to pickle file."""
+    import pickle  # pylint: disable=import-outside-toplevel
+
+    pkl_data = {"px": px, "py": py, "ap": ap, "names": names, "precision": p, "recall": r, "f1": f1}
+
+    pkl_path = save_dir / "metrics.pkl"
+    with open(pkl_path, "wb") as f:
+        pickle.dump(pkl_data, f)
+
+
+def save_metrics_dashboard(px, py, ap, names, p, r, f1, save_dir):
+    """Save metrics to dashboard."""
+    import plotly.graph_objects as go  # pylint: disable=import-outside-toplevel
+    from plotly.colors import qualitative  # pylint: disable=import-outside-toplevel
+
+    # Predefined dash styles to cycle through
+    DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"]
+
+    def _add_best_point_trace(fig, x, y, color, showlegend=False):
+        """Helper function to add a marker for the best point on a curve."""
+        fig.add_trace(go.Scatter(x=[x], y=[y], mode="markers", marker=dict(color=color, size=5), showlegend=showlegend))
+
+    def _add_curve_with_best_point(fig, px, y, color, dash_style, label_prefix, line_width=1):
+        """Helper function to add a curve and its best point to the figure."""
+        best_idx = np.argmax(y)
+
+        fig.add_trace(
+            go.Scatter(
+                x=px,
+                y=y,
+                mode="lines",
+                name=f"{label_prefix} (best={y[best_idx]:.2f} at {px[best_idx]:.2f})",
+                line=dict(color=color, dash=dash_style, width=line_width),
+            )
+        )
+        _add_best_point_trace(fig, px[best_idx], y[best_idx], color)
+
+    def _plot_pr_curve_plotly(px, py, ap, names, prefix=None):
+        py = np.stack(py, axis=1)
+        colors = qualitative.Plotly
+        fig = go.Figure()
+
+        # Individual class curves
+        for i, y in enumerate(py.T):
+            color = colors[i % len(colors)]
+            dash_style = DASH_STYLES[i % len(DASH_STYLES)]
+            label_prefix = f"{names[i]} AP={ap[i, 0]:.3f}"
+            _add_curve_with_best_point(fig, px, y, color, dash_style, label_prefix)
+
+        # Mean curve
+        mean_curve = py.mean(1)
+        label_prefix = f"all classes mAP@0.5={ap[:, 0].mean():.3f}"
+        _add_curve_with_best_point(fig, px, mean_curve, "black", "solid", label_prefix, line_width=4)
+
+        fig.update_layout(title=f"{prefix} Precision-Recall Curve", xaxis_title="Recall", yaxis_title="Precision")
+        return fig
+
+    def _plot_metric_curve_plotly(px, py, names, ylabel="Metric"):
+        colors = qualitative.Plotly
+        fig = go.Figure()
+
+        # Individual class curves
+        for i, y in enumerate(py):
+            color = colors[i % len(colors)]
+            dash_style = DASH_STYLES[i % len(DASH_STYLES)]
+            label_prefix = f"{names[i]}"
+            _add_curve_with_best_point(fig, px, y, color, dash_style, label_prefix)
+
+        # Mean curve
+        mean_curve = np.mean(py, axis=0)
+        label_prefix = "all classes"
+        _add_curve_with_best_point(fig, px, mean_curve, "black", "solid", label_prefix, line_width=3)
+
+        fig.update_layout(title=f"{ylabel} vs Confidence", xaxis_title="Confidence", yaxis_title=ylabel)
+        return fig
+
+    # Generate the dashboard
+    figs = []
+    figs.append(_plot_pr_curve_plotly(px, py, ap, names, prefix="PR"))
+    figs.append(_plot_metric_curve_plotly(px, p, names, ylabel="Precision"))
+    figs.append(_plot_metric_curve_plotly(px, r, names, ylabel="Recall"))
+    figs.append(_plot_metric_curve_plotly(px, f1, names, ylabel="F1"))
+
+    # Save the dashboard
+    with (save_dir / "metrics_dashboard.html").open("w") as f:
+        for fig in figs:
+            f.write(fig.to_html(full_html=False, include_plotlyjs="cdn"))
