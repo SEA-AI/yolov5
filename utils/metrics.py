@@ -413,24 +413,24 @@ def save_metrics_dashboard(px, py, ap, names, p, r, f1, save_dir):
     # Predefined dash styles to cycle through
     DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"]
 
-    def _add_best_point_trace(fig, x, y, color, showlegend=False):
-        """Helper function to add a marker for the best point on a curve."""
-        fig.add_trace(go.Scatter(x=[x], y=[y], mode="markers", marker=dict(color=color, size=5), showlegend=showlegend))
-
     def _add_curve_with_best_point(fig, px, y, color, dash_style, label_prefix, line_width=1):
         """Helper function to add a curve and its best point to the figure."""
         best_idx = np.argmax(y)
+        best_val = y[best_idx]
+        best_px = px[best_idx]
 
         fig.add_trace(
             go.Scatter(
                 x=px,
                 y=y,
                 mode="lines",
-                name=f"{label_prefix} (best={y[best_idx]:.2f} at {px[best_idx]:.2f})",
+                name=f"{label_prefix} (best={best_val:.2f} at {best_px:.2f})",
                 line=dict(color=color, dash=dash_style, width=line_width),
             )
         )
-        _add_best_point_trace(fig, px[best_idx], y[best_idx], color)
+        fig.add_trace(
+            go.Scatter(x=[best_px], y=[best_val], mode="markers", marker=dict(color=color, size=5), showlegend=False)
+        )
 
     def _plot_pr_curve_plotly(px, py, ap, names, prefix=None):
         py = np.stack(py, axis=1)
