@@ -743,6 +743,10 @@ def main(opt, callbacks=Callbacks()):
             "mosaic": (True, 0.0, 1.0),  # image mosaic (probability)
             "mixup": (True, 0.0, 1.0),  # image mixup (probability)
             "copy_paste": (True, 0.0, 1.0),  # segment copy-paste (probability)
+            "iouv_start": (False, 0.05, 0.05),  # iou loss priority switch
+            "iouv_end": (False, 0.95, 0.95),
+            "nms_iou_t": (False, 0.1, 0.1),  # NMS IoU threshold
+            "nms_agnostic": (False, 1.0, 1.0),  # NMS class-agnostic
         }
 
         # GA configs
