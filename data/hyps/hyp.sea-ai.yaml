@@ -41,3 +41,6 @@ iouv_end: 0.95 # COCO uses 0.95
 nms_iou_t: 0.1 # NMS IoU threshold
 nms_agnostic: true # apply NMS across all classes rather than per class
 
+#albumentation
+im_compression_prob: 0.9
+

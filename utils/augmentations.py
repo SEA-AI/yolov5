@@ -25,6 +25,7 @@ class Albumentations:
     def __init__(self, size=640, im_compression_prob=0.9):
         """Initializes Albumentations class for optional data augmentation in YOLOv5 with specified input size and image compression probability."""
         self.transform = None
+        self.im_compression_prob = im_compression_prob
         prefix = colorstr("albumentations: ")
         try:
             import albumentations as A

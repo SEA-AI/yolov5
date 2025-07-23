@@ -136,7 +136,7 @@ def train(hyp, opt, device, callbacks):
         - Datasets: https://github.com/ultralytics/yolov5/tree/master/data
         - Tutorial: https://docs.ultralytics.com/yolov5/tutorials/train_custom_data
     """
-    save_dir, epochs, batch_size, weights, single_cls, single_cls_val, evolve, data, cfg, resume, noval, nosave, workers, freeze, im_compression_prob = (
+    save_dir, epochs, batch_size, weights, single_cls, single_cls_val, evolve, data, cfg, resume, noval, nosave, workers, freeze = (
         Path(opt.save_dir),
         opt.epochs,
         opt.batch_size,
@@ -151,7 +151,6 @@ def train(hyp, opt, device, callbacks):
         opt.nosave,
         opt.workers,
         opt.freeze,
-        opt.im_compression_prob
     )
     callbacks.run("on_pretrain_routine_start")
 
@@ -303,8 +302,7 @@ def train(hyp, opt, device, callbacks):
         quad=opt.quad,
         prefix=colorstr("train: "),
         shuffle=True,
-        seed=opt.seed,
-        im_compression_prob = im_compression_prob
+        seed=opt.seed
     )
     labels = np.concatenate(dataset.labels, 0)
     mlc = int(labels[:, 0].max())  # max label class
@@ -738,8 +736,8 @@ def main(opt, callbacks=Callbacks()):
             "scale": (True, 0.0, 0.9),  # image scale (+/- gain)
             "shear": (True, 0.0, 10.0),  # image shear (+/- deg)
             "perspective": (True, 0.0, 0.001),  # image perspective (+/- fraction), range 0-0.001
-            "flipud": (True, 0.0, 1.0),  # image flip up-down (probability)
-            "fliplr": (True, 0.0, 1.0),  # image flip left-right (probability)
+            "flipud": (False, 0.0, 1.0),  # image flip up-down (probability)
+            "fliplr": (False, 0.0, 1.0),  # image flip left-right (probability)
             "mosaic": (True, 0.0, 1.0),  # image mosaic (probability)
             "mixup": (True, 0.0, 1.0),  # image mixup (probability)
             "copy_paste": (True, 0.0, 1.0),  # segment copy-paste (probability)
@@ -747,10 +745,13 @@ def main(opt, callbacks=Callbacks()):
             "iouv_end": (False, 0.95, 0.95),
             "nms_iou_t": (False, 0.1, 0.1),  # NMS IoU threshold
             "nms_agnostic": (False, 1.0, 1.0),  # NMS class-agnostic
+            "im_compression_prob": (True, 0.0, 1.0),
         }
 
+        print("META", len(meta))
+
         # GA configs
-        pop_size = 50
+        pop_size = 5
         mutation_rate_min = 0.01
         mutation_rate_max = 0.5
         crossover_rate_min = 0.5
@@ -808,12 +809,17 @@ def main(opt, callbacks=Callbacks()):
 
         # If not resuming from a previous checkpoint, generate initial values from .yaml files in opt.evolve_population
         else:
-            yaml_files = [f for f in os.listdir(opt.evolve_population) if f.endswith(".yaml")]
+            #get filename
+            yaml_files = [os.path.basename(opt.hyp)]
+            print(yaml_files)
+            print(hyp_GA.keys())
             for file_name in yaml_files:
                 with open(os.path.join(opt.evolve_population, file_name)) as yaml_file:
                     value = yaml.safe_load(yaml_file)
+                    print(value.keys(), yaml_file)
                     value = np.array([value[k] for k in hyp_GA.keys()])
                     initial_values.append(list(value))
+                print("INIT", initial_values)
 
         # Generate random values within the search space for the rest of the population
         if initial_values is None:

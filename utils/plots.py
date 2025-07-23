@@ -418,7 +418,7 @@ def plot_evolve(evolve_csv="path/to/evolve.csv"):
     for i, k in enumerate(keys[7:]):
         v = x[:, 7 + i]
         mu = v[j]  # best single result
-        plt.subplot(6, 5, i + 1)
+        plt.subplot(6, 6, i + 1)
         plt.scatter(v, f, c=hist2d(v, f, 20), cmap="viridis", alpha=0.8, edgecolors="none")
         plt.plot(mu, f.max(), "k+", markersize=15)
         plt.title(f"{k} = {mu:.3g}", fontdict={"size": 9})  # limit to 40 characters
