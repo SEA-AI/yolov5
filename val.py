@@ -328,8 +328,24 @@ def run(
         )[0]
 
     seen = 0
-    confusion_matrix = ConfusionMatrix(nc=nc)
+
+    # sorry for the hardcoded thresholds
+    class_thresholds = {'AERIAL_ANIMAL': 0.39,
+        'BOAT': 0.5,
+        'BUOY': 0.45,
+        'FAR_AWAY_OBJECT': 0.61,
+        'FLOTSAM': 0.59,
+        'HUMAN_IN_WATER': 0.5,
+        'LEISURE_VEHICLE': 0.72,
+        'MARITIME_ANIMAL': 0.49,
+        'SAILING_BOAT': 0.36,
+        'SHIP': 0.22
+    }
+
     names = model.names if hasattr(model, "names") else model.module.names  # get class names
+    LOGGER.info("Class names: %s", names)
+
+    confusion_matrix = ConfusionMatrix(nc=nc, class_thresholds=class_thresholds, class_names = names)  # init confusion matrix
     if single_cls:
         names = {0: "item"}
     if isinstance(names, (list, tuple)):  # old format

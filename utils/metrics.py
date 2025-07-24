@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from utils import TryExcept, threaded
+from utils import threaded
 
 
 def fitness(x):
@@ -129,16 +129,38 @@ def compute_ap(recall, precision):
 
     return ap, mpre, mrec
 
-
 class ConfusionMatrix:
-    """Generates and visualizes a confusion matrix for evaluating object detection classification performance."""
+    """Generates and visualizes a confusion matrix for evaluating object detection"""
 
-    def __init__(self, nc, conf=0.25, iou_thres=0.45):
-        """Initializes ConfusionMatrix with given number of classes, confidence, and IoU threshold."""
-        self.matrix = np.zeros((nc + 1, nc + 1))
+    def __init__(self, nc, conf=0.25, iou_thres=0.45, class_thresholds=None, class_names=None):
+        """Initializes ConfusionMatrix with given number of classes, confidence and IoU thresholds"""
+        self.matrix = np.zeros((nc + 2, nc + 2))
         self.nc = nc  # number of classes
         self.conf = conf
         self.iou_thres = iou_thres
+        self.class_thresholds = class_thresholds or {}
+        self.class_names = class_names
+
+    def _filter_detections(self, detections):
+        """Apply class-specific confidence filtering, relabel low-confidence as HAZARD (class nc-1)"""
+        if detections is None or len(detections) == 0:
+            return detections
+            
+        
+        filtered_detections = detections.clone()
+        
+        for i, detection in enumerate(detections):
+            conf_score = detection[4].item()
+            class_idx = int(detection[5].item())
+            
+            class_name = self.class_names[class_idx]
+            threshold = self.class_thresholds.get(class_name, self.conf)
+            
+            # If confidence below threshold, relabel as HAZARD (assume last class is HAZARD)
+            if conf_score < threshold:
+                filtered_detections[i, 5] = self.nc + 1 # HAZARD class
+                    
+        return filtered_detections
 
     def process_batch(self, detections, labels):
         """
@@ -158,6 +180,9 @@ class ConfusionMatrix:
                 self.matrix[self.nc, gc] += 1  # background FN
             return
 
+        # Apply class-based filtering
+        detections = self._filter_detections(detections)
+        
         detections = detections[detections[:, 4] > self.conf]
         gt_classes = labels[:, 0].int()
         detection_classes = detections[:, 5].int()
@@ -165,53 +190,58 @@ class ConfusionMatrix:
 
         x = torch.where(iou > self.iou_thres)
         if x[0].shape[0]:
-            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()
+            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1)
             if x[0].shape[0] > 1:
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+                matches = matches[matches[:, 2].argsort(descending=True)]
+                matches = matches[torch.unique(matches[:, 1], return_inverse=True)[1]]
+                matches = matches[matches[:, 2].argsort(descending=True)]
+                matches = matches[torch.unique(matches[:, 0], return_inverse=True)[1]]
         else:
-            matches = np.zeros((0, 3))
+            matches = torch.zeros((0, 3))
 
         n = matches.shape[0] > 0
-        m0, m1, _ = matches.transpose().astype(int)
+        if n:
+            m0, m1, _ = matches.t().int()
+        else:
+            m0, m1 = torch.tensor([]), torch.tensor([])
+            
         for i, gc in enumerate(gt_classes):
-            j = m0 == i
-            if n and sum(j) == 1:
-                self.matrix[detection_classes[m1[j]], gc] += 1  # correct
+            if n:
+                j = m0 == i
+                if torch.sum(j) == 1:
+                    self.matrix[detection_classes[m1[j]], gc] += 1  # correct
+                else:
+                    self.matrix[self.nc, gc] += 1  # true background
             else:
                 self.matrix[self.nc, gc] += 1  # true background
 
         if n:
             for i, dc in enumerate(detection_classes):
-                if not any(m1 == i):
+                if not torch.any(m1 == i):
                     self.matrix[dc, self.nc] += 1  # predicted background
 
     def tp_fp(self):
-        """Calculates true positives (tp) and false positives (fp) excluding the background class from the confusion
-        matrix.
-        """
+        """Calculates true positives (tp) and false positives (fp) excluding background class."""
         tp = self.matrix.diagonal()  # true positives
         fp = self.matrix.sum(1) - tp  # false positives
-        # fn = self.matrix.sum(0) - tp  # false negatives (missed detections)
         return tp[:-1], fp[:-1]  # remove background class
 
-    @TryExcept("WARNING ⚠️ ConfusionMatrix plot failure")
     def plot(self, normalize=True, save_dir="", names=()):
-        """Plots confusion matrix using seaborn, optional normalization; can save plot to specified directory."""
+        """Plots confusion matrix using seaborn, optional normalization"""
         import seaborn as sn
 
-        array = self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)  # normalize columns
+        array = self.matrix / ((self.matrix.sum(0).reshape(1, -1) + 1e-9) if normalize else 1)
         array[array < 0.005] = np.nan  # don't annotate (would appear as 0.00)
 
         fig, ax = plt.subplots(1, 1, figsize=(12, 9), tight_layout=True)
         nc, nn = self.nc, len(names)  # number of classes, names
         sn.set(font_scale=1.0 if nc < 50 else 0.8)  # for label size
-        labels = (0 < nn < 99) and (nn == nc)  # apply names to ticklabels
-        ticklabels = (names + ["background"]) if labels else "auto"
+        
+        labels = (0 < len(nn) < 99) and (len(nn) == nc)  # apply names to ticklabels
+        ticklabels = (names + ["background", "HAZARD"]) if labels else "auto"
+        
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
+            warnings.simplefilter("ignore")  # suppress empty matrix warning
             sn.heatmap(
                 array,
                 ax=ax,
@@ -231,10 +261,9 @@ class ConfusionMatrix:
         plt.close(fig)
 
     def print(self):
-        """Prints the confusion matrix row-wise, with each class and its predictions separated by spaces."""
+        """Prints the confusion matrix row-wise, with each class and its predictions"""
         for i in range(self.nc + 1):
             print(" ".join(map(str, self.matrix[i])))
-
 
 def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
     """
