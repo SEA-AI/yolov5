@@ -17,7 +17,7 @@ from pydantic import ValidationInfo, field_validator
 class RandomCropV2(A.RandomCrop):
     """Crop a random part of the input.
 
-    Unlike the base RandomCrop which raises an error, this version automatically adjusts oversized crop dimensions 
+    Unlike the base RandomCrop which raises an error, this version automatically adjusts oversized crop dimensions
     to match the input image size while maintaining random positioning.
 
     Args:
@@ -118,7 +118,9 @@ class ResizeIfNeeded(DualTransform):
         if not any([max_size, max_size_hw]):
             raise ValueError("At least one of max_size or max_size_hw must be set")
 
-    def _compute_scale(self, height: int, width: int, max_size: Optional[int], max_size_hw: Optional[Tuple[int, int]]) -> float:
+    def _compute_scale(
+        self, height: int, width: int, max_size: Optional[int], max_size_hw: Optional[Tuple[int, int]]
+    ) -> float:
         """Compute the scale factor based on image dimensions and maximum constraints."""
         scale_height = scale_width = 1.0
 
