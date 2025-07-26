@@ -1,14 +1,56 @@
 """Custom augmentations following the Albumentations API."""
 
 import random
-from typing import Dict, List, Optional, Tuple, Union, cast
+from typing import Dict, List, Optional, Tuple, Union, cast, Any
 
 import cv2
 import numpy as np
+import albumentations as A
 from albumentations.augmentations.geometric import functional as F
-from albumentations.core.pydantic import InterpolationType, ScaleIntType
+from albumentations.core.pydantic import InterpolationType
+from albumentations.core.types import ScaleIntType
+from albumentations.augmentations.crops import functional as fcrops
 from albumentations.core.transforms_interface import BaseTransformInitSchema, DualTransform
 from pydantic import ValidationInfo, field_validator
+
+
+class RandomCropV2(A.RandomCrop):
+    """Crop a random part of the input.
+
+    Unlike the base RandomCrop which raises an error, this version automatically adjusts oversized crop dimensions 
+    to match the input image size while maintaining random positioning.
+
+    Args:
+        height: height of the crop.
+        width: width of the crop.
+        p: probability of applying the transform. Default: 1.
+
+    Targets:
+        image, mask, bboxes, keypoints
+
+    Image types:
+        uint8, float32
+
+    """
+
+    def get_params_dependent_on_data(
+        self,
+        params: dict[str, Any],
+        data: dict[str, Any],
+    ) -> dict[str, tuple[int, int, int, int]]:
+        image_shape = params["shape"][:2]
+
+        image_height, image_width = image_shape
+
+        # do not throw an error if the crop size exceeds the image size
+        # instead, dynamically adjust the crop size to the image size
+        height = min(self.height, image_height)
+        width = min(self.width, image_width)
+
+        h_start = random.random()
+        w_start = random.random()
+        crop_coords = fcrops.get_crop_coords(image_shape, (height, width), h_start, w_start)
+        return {"crop_coords": crop_coords}
 
 
 class MaxSizeHWInitSchema(BaseTransformInitSchema):
