@@ -79,7 +79,6 @@ train.run(
     single_cls=False,
     close_mosaic=10,
     single_cls_val=True,
-    im_compression_prob=0.9,
 )
 ```
 

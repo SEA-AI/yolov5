@@ -178,8 +178,6 @@ def create_dataloader(
     prefix="",
     shuffle=False,
     seed=0,
-    im_compression_prob=0.9,
-    pre_augment=False,
 ):
     """Creates and returns a configured DataLoader instance for loading and processing image datasets."""
     if rect and shuffle:
@@ -200,8 +198,6 @@ def create_dataloader(
             image_weights=image_weights,
             prefix=prefix,
             rank=rank,
-            im_compression_prob=im_compression_prob,
-            pre_augment=pre_augment,
         )
 
     batch_size = min(batch_size, len(dataset))
@@ -566,13 +562,10 @@ class LoadImagesAndLabels(Dataset):
         prefix="",
         rank=-1,
         seed=0,
-        im_compression_prob=0.9,
-        pre_augment=False,
     ):
         """Initializes the YOLOv5 dataset loader, handling images and their labels, caching, and preprocessing."""
         self.img_size = img_size
         self.augment = augment
-        self.pre_augment = pre_augment
         self.hyp = hyp
         self.image_weights = image_weights
         self.rect = False if image_weights else rect
@@ -580,8 +573,8 @@ class LoadImagesAndLabels(Dataset):
         self.mosaic_border = [-img_size // 2, -img_size // 2]
         self.stride = stride
         self.path = path
-        self.albumentations = Albumentations(size=img_size, im_compression_prob=im_compression_prob) if augment else None
-        self.pre_albumentations = PreAlbumentations(size=img_size) if pre_augment else None
+        self.albumentations = Albumentations(size=img_size, hyp=hyp) if augment else None
+        self.pre_albumentations = PreAlbumentations(size=img_size, hyp=hyp) if augment else None
         
         try:
             f = []  # image files
@@ -903,8 +896,8 @@ class LoadImagesAndLabels(Dataset):
         labels, segments = self.labels[i].copy(), self.segments[i].copy()
         labels_shape = labels.shape
 
-        if self.pre_augment:
-            im, labels = self.pre_albumentations(im, labels, p=1.0, p_crop=0.8)
+        if self.augment:
+            im, labels = self.pre_albumentations(im, labels, p=1.0)
             (h0, w0) = (h, w) = im.shape[:2]
             # do we need to update the segments?
 
