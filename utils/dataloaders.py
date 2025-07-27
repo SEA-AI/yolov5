@@ -877,7 +877,7 @@ class LoadImagesAndLabels(Dataset):
             return im, (h0, w0), im.shape[:2]  # im, hw_original, hw_resized
         return self.ims[i], self.im_hw0[i], self.im_hw[i]  # im, hw_original, hw_resized
     
-    def load_image_and_labels(self, i: int) -> tuple[np.ndarray, tuple[int, int], tuple[int, int], np.ndarray]:
+    def load_image_and_labels(self, i: int) -> tuple[np.ndarray, tuple[int, int], tuple[int, int], np.ndarray, np.ndarray]:
         """
         Loads an image by index, returning the image, its dimensions, and the labels.
 
