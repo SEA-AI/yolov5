@@ -575,7 +575,7 @@ class LoadImagesAndLabels(Dataset):
         self.path = path
         self.albumentations = Albumentations(size=img_size, hyp=hyp) if augment else None
         self.pre_albumentations = PreAlbumentations(size=img_size, hyp=hyp) if augment else None
-        
+
         try:
             f = []  # image files
             for p in path if isinstance(path, list) else [path]:
@@ -701,7 +701,9 @@ class LoadImagesAndLabels(Dataset):
                     if cache_images == "disk":
                         b += self.npy_files[i].stat().st_size
                     else:  # 'ram'
-                        self.ims[i], self.im_hw0[i], self.im_hw[i], _, _ = x  # im, hw_orig, hw_resized = load_image(self, i)
+                        self.ims[i], self.im_hw0[i], self.im_hw[i], _, _ = (
+                            x  # im, hw_orig, hw_resized, labels, segments = load_image_and_labels(self, i)
+                        )
                         b += self.ims[i].nbytes * WORLD_SIZE
                     pbar.desc = f"{prefix}Caching images ({b / gb:.1f}GB {cache_images})"
                 pbar.close()
@@ -876,8 +878,10 @@ class LoadImagesAndLabels(Dataset):
                 im = cv2.resize(im, (math.ceil(w0 * r), math.ceil(h0 * r)), interpolation=interp)
             return im, (h0, w0), im.shape[:2]  # im, hw_original, hw_resized
         return self.ims[i], self.im_hw0[i], self.im_hw[i]  # im, hw_original, hw_resized
-    
-    def load_image_and_labels(self, i: int) -> tuple[np.ndarray, tuple[int, int], tuple[int, int], np.ndarray, np.ndarray]:
+
+    def load_image_and_labels(
+        self, i: int
+    ) -> tuple[np.ndarray, tuple[int, int], tuple[int, int], np.ndarray, np.ndarray]:
         """
         Loads an image by index, returning the image, its dimensions, and the labels.
 
@@ -908,7 +912,7 @@ class LoadImagesAndLabels(Dataset):
             (h, w) = im.shape[:2]
 
         labels = np.empty((0, labels_shape[1])) if not labels.size else labels
-        
+
         return im, (h0, w0), (h, w), labels, segments
 
     def cache_images_to_disk(self, i):
@@ -1110,7 +1114,7 @@ def imread_16bit_compatible(f: str, augment16: bool = False) -> np.ndarray:
     # Read image with OpenCV, convert from 16-bit to 8-bit if necessary
     im = cv2.imread(f, cv2.IMREAD_UNCHANGED)  # load image as BGR if 3-ch image
     if im.dtype == np.uint8 and (im.ndim == 2 or im.shape[-1] == 1):
-        im = cv2.cvtColor(im, cv2.COLOR_GRAY2BGR) # BGR    
+        im = cv2.cvtColor(im, cv2.COLOR_GRAY2BGR)  # BGR
     if im.dtype == np.uint16:
         try:
             from utils.albumentations16 import convert_16bit_to_8bit
