@@ -14,7 +14,7 @@ from albumentations.core.transforms_interface import BaseTransformInitSchema, Du
 from pydantic import ValidationInfo, field_validator
 
 
-class RandomCropV2(A.RandomCrop):
+class SafeRandomCrop(A.RandomCrop):
     """Crop a random part of the input.
 
     Unlike the base RandomCrop which raises an error, this version automatically adjusts oversized crop dimensions

@@ -71,7 +71,7 @@ class PreAlbumentations(Albumentations):
 
             check_version(A.__version__, "1.0.3", hard=True)  # version requirement
             T = [
-                Ax.RandomCropV2(p=hyp.get("pre_crop", 0.0) if hyp else 0.0, height=size, width=size),
+                Ax.SafeRandomCrop(p=hyp.get("pre_crop", 0.0) if hyp else 0.0, height=size, width=size),
             ]  # transforms
             self.transform = A.Compose(
                 T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"], clip=True)
