@@ -32,6 +32,10 @@ fliplr: 0.5  # image flip left-right (probability)
 mosaic: 1.0  # image mosaic (probability)
 mixup: 0.0  # image mixup (probability)
 copy_paste: 0.0  # segment copy-paste (probability)
+compression: 0.9  # image compression (probability)
+
+# pre-augmentations (before main augmentations)
+pre_crop: 0.8  # random crop (probability)
 
 # iou range for mAP metrics -> torch.linspace(iouv_start, iouv_end, 10)
 iouv_start: 0.05 # COCO uses 0.5

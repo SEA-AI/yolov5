@@ -90,7 +90,7 @@ def update(
     loss_theta: CrossEntropyLoss,
     pitch_weight: float,
     theta_weight: float,
-    scaler: torch.cuda.amp.GradScaler,
+    scaler: torch.amp.GradScaler,
     optimizer: torch.optim.Optimizer,
     ema: ModelEMA,
     epoch: int,
@@ -336,7 +336,7 @@ def run(
     loss_pitch = CrossEntropyLoss(label_smoothing=0.0)
     loss_theta = CrossEntropyLoss(label_smoothing=0.0)
 
-    scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=amp)
 
 
     ema = ModelEMA(model)

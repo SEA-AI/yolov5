@@ -10,6 +10,7 @@ import torch
 import torchvision.transforms as T
 import torchvision.transforms.functional as TF
 
+from utils import albumextensions as Ax
 from utils.general import LOGGER, check_version, colorstr, resample_segments, segment2box, xywhn2xyxy
 from utils.metrics import bbox_ioa
 
@@ -22,8 +23,8 @@ FILL_VALUE = 0  # 114
 class Albumentations:
     """Provides optional data augmentation for YOLOv5 using Albumentations library if installed."""
 
-    def __init__(self, size=640, im_compression_prob=0.9):
-        """Initializes Albumentations class for optional data augmentation in YOLOv5 with specified input size and image compression probability."""
+    def __init__(self, size=640, hyp=None):
+        """Initializes Albumentations class for optional data augmentation in YOLOv5 with specified input size."""
         self.transform = None
         prefix = colorstr("albumentations: ")
         try:
@@ -39,7 +40,7 @@ class Albumentations:
                 A.CLAHE(p=0.01),
                 A.RandomBrightnessContrast(p=0.0),
                 A.RandomGamma(p=0.0),
-                A.ImageCompression(quality_lower=50, p=im_compression_prob),
+                A.ImageCompression(p=hyp.get("compression", 0.0) if hyp else 0.0, quality_lower=50),
             ]  # transforms
             self.transform = A.Compose(T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]))
 
@@ -55,6 +56,32 @@ class Albumentations:
             new = self.transform(image=im, bboxes=labels[:, 1:], class_labels=labels[:, 0])  # transformed
             im, labels = new["image"], np.array([[c, *b] for c, b in zip(new["class_labels"], new["bboxes"])])
         return im, labels
+
+
+class PreAlbumentations(Albumentations):
+    """Chain of augmentations to be applied before the main augmentations relying on albumentations."""
+
+    def __init__(self, size=640, hyp=None):
+        """Initializes Albumentations class for optional data augmentation in YOLOv5 with specified input size."""
+        self.transform = None
+        self.size = size
+        prefix = colorstr("pre-albumentations: ")
+        try:
+            import albumentations as A
+
+            check_version(A.__version__, "1.0.3", hard=True)  # version requirement
+            T = [
+                Ax.SafeRandomCrop(p=hyp.get("pre_crop", 0.0) if hyp else 0.0, height=size, width=size),
+            ]  # transforms
+            self.transform = A.Compose(
+                T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"], clip=True)
+            )
+
+            LOGGER.info(prefix + ", ".join(f"{x}".replace("always_apply=False, ", "") for x in T if x.p))
+        except ImportError:  # package not installed, skip
+            pass
+        except Exception as e:
+            LOGGER.info(f"{prefix}{e}")
 
 
 def normalize(x, mean=IMAGENET_MEAN, std=IMAGENET_STD, inplace=False):
