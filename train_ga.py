@@ -255,12 +255,12 @@ ga = GeneticAlgorithm(
     mutation_rate=0.1,
     crossover_rate=0.9,
     tournament_size=2,
-    pop_per_gpu=2,  # optional: population = num_gpus * 3
+    pop_per_gpu=3,  # optional: population = num_gpus * 3
     base_hyp = "/home/ubuntu/yolov5/data/hyps/hyp.sea-ai.yaml",
     base_args = base_args
 )
 
-ga.evolve(generations=2)
+ga.evolve(generations=100)
 print("Best individual:", ga.get_best_individual())
 
 
