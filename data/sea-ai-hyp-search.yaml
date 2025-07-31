@@ -1,0 +1,18 @@
+names:
+  0: AERIAL_ANIMAL
+  1: BOAT
+  2: BUOY
+  3: FAR_AWAY_OBJECT
+  4: FLOTSAM
+  5: HUMAN_IN_WATER
+  6: LEISURE_VEHICLE
+  7: MARITIME_ANIMAL
+  8: SAILING_BOAT
+  9: SHIP
+
+train: 
+  - /home/gilsimas/git/datasets/TRAIN_RGB_ALL_2025_06_IMAGE_BB_CV_2025-07-30/images/train/
+  - /home/gilsimas/git/datasets/TRAIN_THERMAL_ALL_2025_06_IMAGE_BB_CV_2025-07-29/images/train/
+val: 
+  - /home/gilsimas/git/datasets/TRAIN_RGB_ALL_2025_06_IMAGE_BB_CV_2025-07-30/images/val/
+  - /home/gilsimas/git/datasets/TRAIN_THERMAL_ALL_2025_06_IMAGE_BB_CV_2025-07-29/images/val/

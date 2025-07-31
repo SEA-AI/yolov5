@@ -96,6 +96,13 @@ from utils.torch_utils import (
     torch_distributed_zero_first,
 )
 
+
+import logging
+
+# Disable all logging
+logging.disable(logging.CRITICAL)
+
+
 LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv("RANK", -1))
 WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
@@ -163,6 +170,7 @@ def train(hyp, opt, device, callbacks):
     if isinstance(hyp, str):
         with open(hyp, errors="ignore") as f:
             hyp = yaml.safe_load(f)  # load hyps dict
+
     LOGGER.info(colorstr("hyperparameters: ") + ", ".join(f"{k}={v}" for k, v in hyp.items()))
     opt.hyp = hyp.copy()  # for saving hyps to checkpoints
 
@@ -666,7 +674,7 @@ def main(opt, callbacks=Callbacks()):
         opt.data, opt.cfg, opt.hyp, opt.weights, opt.project = (
             check_file(opt.data),
             check_yaml(opt.cfg),
-            check_yaml(opt.hyp),
+            check_yaml(opt.hyp) if isinstance(opt.hyp, str) else opt.hyp,
             str(opt.weights),
             str(opt.project),
         )  # checks

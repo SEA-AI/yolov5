@@ -23,59 +23,82 @@ def suppress_output():
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
-def train_and_validate(gene_ranges, individual, device_id, return_dict, i):
-    
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(device_id)
+def train_and_validate(gene_ranges, individual, device_id, return_dict, i, project_name, name, base_args):
+    try:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(device_id)
+        from train import run as train
 
-    from train import run as train
+        kwargs = dict()
 
-    import logging
-    logging.getLogger().setLevel(logging.ERROR)
+        with open("/home/gilsimas/git/yolov5/data/hyps/hyp.scratch-med.yaml", "r") as f:
+            config = yaml.safe_load(f)
 
-    with open("/home/gilsimas/git/yolov5/data/hyps/hyp.scratch-med.yaml", "r") as f:
-        config = yaml.safe_load(f)
         for gene_name, gene_value in zip(gene_ranges.keys(), individual):
+            if gene_value < gene_ranges[gene_name][0] or gene_value > gene_ranges[gene_name][1]:
+                raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
 
-            if gene_value < gene_ranges[gene_name][0]:
-                raise ValueError(f"Invalid value {gene_value} for gene {gene_name}. It should be between {gene_ranges[gene_name][0]} and {gene_ranges[gene_name][1]}")
-            if gene_value > gene_ranges[gene_name][1]:
-                raise ValueError(f"Invalid value {gene_value} for gene {gene_name}. It should be between {gene_ranges[gene_name][0]} and {gene_ranges[gene_name][1]}")
-            
-            config[gene_name] = gene_value
-          
-    with suppress_output():
-        train_data = train(hyp=config, epochs=1, device=device_id)
+            if gene_name in config:
+                config[gene_name] = gene_value
+            else:
+                kwargs[gene_name] = gene_value
 
-    save_dir = train_data.save_dir
+        # Merge base args
+        kwargs.update(base_args)
 
-    with open(os.path.join(save_dir, "results.csv"), "r") as f:
-        data = pd.read_csv(f)
+        with suppress_output():
+            train_data = train(hyp=config, device=device_id, **kwargs, project=project_name, name=name)
 
-    data["f1"] = 2 * data["   metrics/precision"] * data["      metrics/recall"] / (data["   metrics/precision"] + data["      metrics/recall"])
-    
-    max_map_epoch = data["metrics/mAP_0.5:0.95"].idxmax()
+        save_dir = train_data.save_dir
+        with open(os.path.join(save_dir, "results.csv"), "r") as f:
+            data = pd.read_csv(f)
 
-    f1 = data["f1"][max_map_epoch]
-    map05_95 = data["metrics/mAP_0.5:0.95"][max_map_epoch]
-    map_05 =   data["     metrics/mAP_0.5"][max_map_epoch]
-    pr =       data["   metrics/precision"][max_map_epoch]
-    rc =       data["      metrics/recall"][max_map_epoch]
+        data["f1"] = 2 * data["   metrics/precision"] * data["      metrics/recall"] / (
+            data["   metrics/precision"] + data["      metrics/recall"])
 
-    return_dict[i] = {"map05_95": map05_95, "map_05": map_05, "pr": pr, "rc": rc, "f1": f1}
+        max_map_epoch = data["metrics/mAP_0.5:0.95"].idxmax()
 
-    return return_dict[i]
+        return_dict[i] = {
+            "map05_95": data["metrics/mAP_0.5:0.95"][max_map_epoch],
+            "map_05": data["     metrics/mAP_0.5"][max_map_epoch],
+            "pr": data["   metrics/precision"][max_map_epoch],
+            "rc": data["      metrics/recall"][max_map_epoch],
+            "f1": data["f1"][max_map_epoch],
+        }
+
+        print(f"✅ Process {i} finished successfully", flush=True)
+
+    except Exception as e:
+        print(f"❌ Exception in process {i} on device {device_id}: {e}", flush=True)
+        return_dict[i] = {
+            "map05_95": 0.0, "map_05": 0.0, "pr": 0.0, "rc": 0.0, "f1": 0.0
+        }
+
 
 class GeneticAlgorithm:
     def __init__(self,
-                 cost_function=None,
                  pop_size=None,
                  mutation_rate=0.05,
                  crossover_rate=0.8,
                  elite_size=2,
                  tournament_size=3,
-                 pop_per_gpu=2):
+                 pop_per_gpu=2,
+                 base_hyp = "/home/gilsimas/git/yolov5/data/hyps/hyp.sea-ai.yaml",
+                 base_args = {
+                     "imgsz": 1280,
+                     "epochs": 20,
+                     "weights": "yolov5s.pt",
+                     "batch_size": -1,
+                     "single_cls": False,
+                     "multi_scale": False,
+                     "close_mosaic": 5,
+                     "single_cls_val": True,
+                    }
+                 ):
 
-        self.cost_function = cost_function
+        with open(base_hyp, "r") as f:
+            self.base_hyp = yaml.safe_load(f)
+        
+        self.base_args = base_args
 
         # Detect GPUs
         self.num_gpus = 2
@@ -93,17 +116,19 @@ class GeneticAlgorithm:
         self.tournament_size = max(2, min(10, tournament_size))
 
         self.gene_ranges = {
+            "lr0": (1e-5, 1e-2),
             "hsv_h": (0.0, 0.1),  # image HSV-Hue augmentation (fraction)
             "hsv_s": (0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
             "hsv_v": (0.0, 0.9),  # image HSV-Value augmentation (fraction)
             "degrees": (0.0, 45.0),  # image rotation (+/- deg)
             "translate": (0.0, 0.9),  # image translation (+/- fraction)
-            "scale": (0.0, 0.9),  # image scale (+/- gain)
+            "scale": (0.0, 0.6),  # image scale (+/- gain)
             "shear": (0.0, 10.0),  # image shear (+/- deg)
             "perspective": (0.0, 0.001),  # image perspective (+/- fraction), range 0-0.001
             "im_compression_prob": (0.0, 1.0),
             "mosaic": (0.0, 1.0),  # image mosaic (probability)
-            "mixup": (0.0, 0.5),  # image mixup (probability)
+            "mixup": (0.0, 0.75),  # image mixup (probability)
+            "pre_crop": (0.0, 1.0)
         }
 
         self.gene_length = len(self.gene_ranges)
@@ -113,8 +138,14 @@ class GeneticAlgorithm:
 
         print(f"Initialized GA with {self.pop_size} individuals across {self.num_gpus} GPUs")
 
+    def _get_base_individual(self):
+        genome = []
+        for gene, ranges in self.gene_ranges.items():
+            genome.append(random.uniform(ranges[0], ranges[1]) if gene not in self.base_hyp.keys() else self.base_hyp[gene])
+        return genome
+            
     def _initialize_population(self):
-        return [self.generate_individual() for _ in range(self.pop_size)]
+        return [self._get_base_individual()]+[self.generate_individual() for _ in range(self.pop_size-1)]
 
     def generate_individual(self):
         genome = []
@@ -134,14 +165,21 @@ class GeneticAlgorithm:
 
             for i, pop_idx in enumerate(range(batch_start, batch_end)):
                 
-                print(f"\n🧑 INDIVIDUAL {pop_idx} running in device {i}\n")
-
+                print(f"\n          🧑 INDIVIDUAL {pop_idx} running in device {i}\n")
                 individual = self.population[pop_idx]
                 gpu_id = i  # because we cycle over num_gpus at each batch
                 p = mp.Process(
                     target=train_and_validate,
-                    args=(self.gene_ranges, individual, gpu_id, return_dict, pop_idx)
-                )
+                    args=(self.gene_ranges, 
+                          individual, 
+                          gpu_id, 
+                          return_dict, 
+                          pop_idx, 
+                          "genetic-algorithm",
+                          f"individual-{pop_idx}-generation-{self.generation_number}",
+                          self.base_args
+                          )
+                    )
                 processes.append(p)
                 p.start()
                 time.sleep(20) # important otherwise both runs will try to read same .pt file
@@ -149,31 +187,8 @@ class GeneticAlgorithm:
             for p in processes:
                 p.join()
 
+        print(f"✅ Return Dict KEYS:VALUES: {return_dict.keys()}:VALUES: {return_dict.values()}")
         self.fitness_scores = [return_dict[i] for i in range(pop_size)]
-
-        for i, (individual, score) in enumerate(zip(self.population, self.fitness_scores)):
-            run = wandb.init(
-                project="genetic-algorithm-project",
-                name=f"individual-{i}-generation-{self.generation_number}",
-                reinit=True,  # Important for creating multiple runs in one script
-                config={
-                    "generation": self.generation_number,
-                    "individual_id": i,
-                    # Add any other hyperparameters you want
-                }
-            )
-
-            # Log metrics for this individual
-            wandb.log({
-                "map05_95": score["map05_95"],
-                "map_05": score["map_05"],
-                "pr": score["pr"],
-                "rc": score["rc"],
-                "f1": score["f1"],
-            })
-            for gene_name, gene_value in zip(self.gene_ranges.keys(), individual):
-                wandb.log({gene_name: gene_value})
-            wandb.finish()
 
     def _get_elites(self):
         sorted_indices = sorted(range(self.pop_size), key=lambda i: self.fitness_scores[i]["map05_95"], reverse=True)
@@ -217,13 +232,30 @@ class GeneticAlgorithm:
 
             self.population = new_population
 
+
+base_args = {
+    "imgsz": 1280,
+    "epochs": 20,
+    "weights": "yolov5s.pt",
+    "batch_size": -1,
+    "single_cls": False,
+    "multi_scale": False,
+    "close_mosaic": 5,
+    "single_cls_val": True,
+    "batch_size": 8
+}
+
 ga = GeneticAlgorithm(
     elite_size=2,
     mutation_rate=0.1,
     crossover_rate=0.9,
     tournament_size=2,
-    pop_per_gpu=2  # optional: population = num_gpus * 3
+    pop_per_gpu=2,  # optional: population = num_gpus * 3
+    base_hyp = "/home/gilsimas/git/yolov5/data/hyps/hyp.sea-ai.yaml",
+    base_args = base_args
 )
 
 ga.evolve(generations=2)
 print("Best individual:", ga.get_best_individual())
+
+
