@@ -59,7 +59,7 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
 
         return_dict[i] = {
             "map05_95": data["metrics/mAP_0.05:0.95"][max_map_epoch],
-            "map_05": data["     metrics/mAP_0.05"][max_map_epoch],
+            "map_05": data["    metrics/mAP_0.05"][max_map_epoch],
             "pr": data["   metrics/precision"][max_map_epoch],
             "rc": data["      metrics/recall"][max_map_epoch],
             "f1": data["f1"][max_map_epoch],
