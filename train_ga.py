@@ -117,6 +117,11 @@ class GeneticAlgorithm:
 
         self.gene_ranges = {
             "lr0": (1e-5, 1e-2),
+            "lrf": (0.1, 0.5),
+            "momentum": (0.5, 1.0),
+            "weight_decay": (0.0, 0.001),
+            "warmup_momentum": (0.5, 1.0),
+            "warmup_bias_lr": (0.0, 0.5),
             "hsv_h": (0.0, 0.1),  # image HSV-Hue augmentation (fraction)
             "hsv_s": (0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
             "hsv_v": (0.0, 0.9),  # image HSV-Value augmentation (fraction)
