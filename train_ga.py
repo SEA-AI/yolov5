@@ -54,7 +54,7 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
 
         data["f1"] = 2 * data["   metrics/precision"] * data["      metrics/recall"] / (
             data["   metrics/precision"] + data["      metrics/recall"])
-
+        print(data.head())
         max_map_epoch = data["metrics/mAP_0.5:0.95"].idxmax()
 
         return_dict[i] = {
