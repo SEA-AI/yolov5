@@ -260,7 +260,7 @@ ga = GeneticAlgorithm(
     base_args = base_args
 )
 
-ga.evolve(generations=100)
+ga.evolve(generations=200)
 print("Best individual:", ga.get_best_individual())
 
 
