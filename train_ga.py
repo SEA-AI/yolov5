@@ -247,7 +247,7 @@ base_args = {
     "multi_scale": False,
     "close_mosaic": 5,
     "single_cls_val": True,
-    "batch_size": 32
+    "batch_size": 16
 }
 
 ga = GeneticAlgorithm(
