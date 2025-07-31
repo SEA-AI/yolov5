@@ -30,7 +30,7 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
 
         kwargs = dict()
 
-        with open("/home/gilsimas/git/yolov5/data/hyps/hyp.scratch-med.yaml", "r") as f:
+        with open("/home/ubuntu/yolov5/data/hyps/hyp.sea-ai.yaml", "r") as f:
             config = yaml.safe_load(f)
 
         for gene_name, gene_value in zip(gene_ranges.keys(), individual):
@@ -256,7 +256,7 @@ ga = GeneticAlgorithm(
     crossover_rate=0.9,
     tournament_size=2,
     pop_per_gpu=2,  # optional: population = num_gpus * 3
-    base_hyp = "/home/gilsimas/git/yolov5/data/hyps/hyp.sea-ai.yaml",
+    base_hyp = "/home/ubuntu/yolov5/data/hyps/hyp.sea-ai.yaml",
     base_args = base_args
 )
 
