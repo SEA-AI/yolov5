@@ -101,7 +101,7 @@ class GeneticAlgorithm:
         self.base_args = base_args
 
         # Detect GPUs
-        self.num_gpus = 2
+        self.num_gpus = 8
         if self.num_gpus == 0:
             raise RuntimeError("No GPUs detected!")
         
