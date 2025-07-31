@@ -240,7 +240,7 @@ class GeneticAlgorithm:
 
 base_args = {
     "imgsz": 1280,
-    "epochs": 20,
+    "epochs": 30,
     "weights": "yolov5s.pt",
     "batch_size": -1,
     "single_cls": False,
