@@ -46,7 +46,13 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
         kwargs.update(base_args)
 
         with suppress_output():
-            train_data = train(hyp=config, device=device_id, **kwargs, project=project_name, name=name, data = "data/sea-ai-hyp-search.yaml")
+            train_data = train(hyp=config, 
+                                device=device_id, 
+                                project=project_name, 
+                                name=name, 
+                            #    data = "data/sea-ai-hyp-search.yaml",
+                                data = "data/coco128.yaml",
+                                **kwargs)
 
         save_dir = train_data.save_dir
         with open(os.path.join(save_dir, "results.csv"), "r") as f:
@@ -180,7 +186,7 @@ class GeneticAlgorithm:
                           gpu_id, 
                           return_dict, 
                           pop_idx, 
-                          "genetic-algorithm",
+                          "genetic-algorithm-coco",
                           f"individual-{pop_idx}-generation-{self.generation_number}",
                           self.base_args
                           )
@@ -240,7 +246,7 @@ class GeneticAlgorithm:
 
 base_args = {
     "imgsz": 1280,
-    "epochs": 30,
+    "epochs": 20,
     "weights": "yolov5s.pt",
     "batch_size": -1,
     "single_cls": False,
