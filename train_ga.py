@@ -50,8 +50,8 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
                                 device=device_id, 
                                 project=project_name, 
                                 name=name, 
-                            #    data = "data/sea-ai-hyp-search.yaml",
-                                data = "data/coco128.yaml",
+                                data = "data/sea-ai-hyp-search.yaml",
+                                # data = "data/coco128.yaml",
                                 **kwargs)
 
         save_dir = train_data.save_dir
