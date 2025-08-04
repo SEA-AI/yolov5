@@ -100,7 +100,7 @@ from utils.torch_utils import (
 import logging
 
 # Disable all logging
-logging.disable(logging.CRITICAL)
+# logging.disable(logging.CRITICAL)
 
 
 LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))  # https://pytorch.org/docs/stable/elastic/run.html

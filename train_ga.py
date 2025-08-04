@@ -46,7 +46,7 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
         kwargs.update(base_args)
 
         with suppress_output():
-            train_data = train(hyp=config, device=device_id, **kwargs, project=project_name, name=name)
+            train_data = train(hyp=config, device=device_id, **kwargs, project=project_name, name=name, data = "data/sea-ai-hyp-search.yaml")
 
         save_dir = train_data.save_dir
         with open(os.path.join(save_dir, "results.csv"), "r") as f:
@@ -128,12 +128,12 @@ class GeneticAlgorithm:
             "degrees": (0.0, 45.0),  # image rotation (+/- deg)
             "translate": (0.0, 0.9),  # image translation (+/- fraction)
             "scale": (0.0, 0.6),  # image scale (+/- gain)
-            "shear": (0.0, 10.0),  # image shear (+/- deg)
+            "shear": (0.0, 20.0),  # image shear (+/- deg)
             "perspective": (0.0, 0.001),  # image perspective (+/- fraction), range 0-0.001
-            "im_compression_prob": (0.0, 1.0),
+            "compression": (0.0, 1.0),
             "mosaic": (0.0, 1.0),  # image mosaic (probability)
             "mixup": (0.0, 0.75),  # image mixup (probability)
-            "pre_crop": (0.0, 1.0)
+            "pre_crop": (0.0, 1.0) 
         }
 
         self.gene_length = len(self.gene_ranges)
