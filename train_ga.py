@@ -139,7 +139,8 @@ class GeneticAlgorithm:
             "compression": (0.0, 1.0),
             "mosaic": (0.0, 1.0),  # image mosaic (probability)
             "mixup": (0.0, 0.75),  # image mixup (probability)
-            "pre_crop": (0.0, 1.0) 
+            "pre_crop": (0.0, 1.0),
+            "batch_size": (8, 16)
         }
 
         self.gene_length = len(self.gene_ranges)
@@ -186,7 +187,7 @@ class GeneticAlgorithm:
                           gpu_id, 
                           return_dict, 
                           pop_idx, 
-                          "genetic-algorithm-coco",
+                          "genetic-algorithm-seaai",
                           f"individual-{pop_idx}-generation-{self.generation_number}",
                           self.base_args
                           )
@@ -248,12 +249,10 @@ base_args = {
     "imgsz": 1280,
     "epochs": 20,
     "weights": "yolov5s.pt",
-    "batch_size": -1,
     "single_cls": False,
     "multi_scale": False,
     "close_mosaic": 5,
     "single_cls_val": True,
-    "batch_size": 16
 }
 
 ga = GeneticAlgorithm(
