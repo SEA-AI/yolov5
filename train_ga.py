@@ -122,25 +122,25 @@ class GeneticAlgorithm:
         self.tournament_size = max(2, min(10, tournament_size))
 
         self.gene_ranges = {
-            "lr0": (1e-5, 1e-2),
-            "lrf": (0.1, 0.5),
-            "momentum": (0.5, 1.0),
-            "weight_decay": (0.0, 0.001),
-            "warmup_momentum": (0.5, 1.0),
-            "warmup_bias_lr": (0.0, 0.5),
-            "hsv_h": (0.0, 0.1),  # image HSV-Hue augmentation (fraction)
-            "hsv_s": (0.0, 0.9),  # image HSV-Saturation augmentation (fraction)
-            "hsv_v": (0.0, 0.9),  # image HSV-Value augmentation (fraction)
-            "degrees": (0.0, 45.0),  # image rotation (+/- deg)
-            "translate": (0.0, 0.9),  # image translation (+/- fraction)
-            "scale": (0.0, 0.6),  # image scale (+/- gain)
-            "shear": (0.0, 20.0),  # image shear (+/- deg)
-            "perspective": (0.0, 0.001),  # image perspective (+/- fraction), range 0-0.001
-            "compression": (0.0, 1.0),
-            "mosaic": (0.0, 1.0),  # image mosaic (probability)
-            "mixup": (0.0, 0.75),  # image mixup (probability)
-            "pre_crop": (0.0, 1.0),
-            "batch_size": (8, 16)
+            "lr0": (1e-5, 1e-2, "float"),
+            "lrf": (0.1, 0.5, "float"),
+            "momentum": (0.5, 1.0, "float"),
+            "weight_decay": (0.0, 0.001, "float"),
+            "warmup_momentum": (0.5, 1.0, "float"),
+            "warmup_bias_lr": (0.0, 0.5, "float"),
+            "hsv_h": (0.0, 0.1, "float"),  # image HSV-Hue augmentation (fraction)
+            "hsv_s": (0.0, 0.9, "float"),  # image HSV-Saturation augmentation (fraction)
+            "hsv_v": (0.0, 0.9, "float"),  # image HSV-Value augmentation (fraction)
+            "degrees": (0.0, 45.0, "float"),  # image rotation (+/- deg)
+            "translate": (0.0, 0.9, "float"),  # image translation (+/- fraction)
+            "scale": (0.0, 0.6, "float"),  # image scale (+/- gain)
+            "shear": (0.0, 20.0, "float"),  # image shear (+/- deg)
+            "perspective": (0.0, 0.001, "float"),  # image perspective (+/- fraction), range 0-0.001
+            "compression": (0.0, 1.0, "float"),
+            "mosaic": (0.0, 1.0, "float"),  # image mosaic (probability)
+            "mixup": (0.0, 0.75, "float"),  # image mixup (probability)
+            "pre_crop": (0.0, 1.0, "float"),
+            "batch_size": (8, 16, "int"),
         }
 
         self.gene_length = len(self.gene_ranges)
@@ -153,7 +153,10 @@ class GeneticAlgorithm:
     def _get_base_individual(self):
         genome = []
         for gene, ranges in self.gene_ranges.items():
-            genome.append(random.uniform(ranges[0], ranges[1]) if gene not in self.base_hyp.keys() else self.base_hyp[gene])
+            gene_value = random.uniform(ranges[0], ranges[1]) if gene not in self.base_hyp.keys() else self.base_hyp[gene]
+            if ranges[2] == "int":
+                gene_value = int(gene_value)
+            genome.append(gene_value)
         return genome
             
     def _initialize_population(self):
@@ -162,7 +165,10 @@ class GeneticAlgorithm:
     def generate_individual(self):
         genome = []
         for gene, ranges in self.gene_ranges.items():
-            genome.append(random.uniform(ranges[0], ranges[1]))
+            gene_value = random.uniform(ranges[0], ranges[1])
+            if ranges[2] == "int":
+                gene_value = int(gene_value)
+            genome.append(gene_value)
         return genome
 
     def _evaluate_population(self):
