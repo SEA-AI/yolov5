@@ -3,13 +3,13 @@
 # python train.py --batch 32 --cfg yolov5m6.yaml --weights '' --data coco.yaml --img 1280 --epochs 300
 # See tutorials for hyperparameter evolution https://github.com/ultralytics/yolov5#tutorials
 
-lr0: 0.001  # initial learning rate (SGD=1E-2, Adam=1E-3)
-lrf: 0.1  # final OneCycleLR learning rate (lr0 * lrf)
-momentum: 0.937  # SGD momentum/Adam beta1
-weight_decay: 0.0005  # optimizer weight decay 5e-4
+lr0: 0.0055  # initial learning rate (SGD=1E-2, Adam=1E-3)
+lrf: 0.32903  # final OneCycleLR learning rate (lr0 * lrf)
+momentum: 0.78936  # SGD momentum/Adam beta1
+weight_decay: 0.00099  # optimizer weight decay 5e-4
 warmup_epochs: 3.0  # warmup epochs (fractions ok)
-warmup_momentum: 0.8  # warmup initial momentum
-warmup_bias_lr: 0.1  # warmup initial bias lr
+warmup_momentum: 0.94893  # warmup initial momentum
+warmup_bias_lr: 0.26759  # warmup initial bias lr
 box: 0.05  # box loss gain
 cls: 0.3  # cls loss gain
 cls_pw: 1.0  # cls BCELoss positive_weight
@@ -19,23 +19,23 @@ iou_t: 0.20  # IoU training threshold
 anchor_t: 4.0  # anchor-multiple threshold
 # anchors: 3  # anchors per output layer (0 to ignore)
 fl_gamma: 0.0  # focal loss gamma (efficientDet default gamma=1.5)
-hsv_h: 0.015  # image HSV-Hue augmentation (fraction)
-hsv_s: 0.7  # image HSV-Saturation augmentation (fraction)
-hsv_v: 0.4 # image HSV-Value augmentation (fraction)
-degrees: 10.0  # image rotation (+/- deg)
-translate: 0.1  # image translation (+/- fraction)
+hsv_h: 0.03148  # image HSV-Hue augmentation (fraction)
+hsv_s: 0.44289  # image HSV-Saturation augmentation (fraction)
+hsv_v: 0.14536 # image HSV-Value augmentation (fraction)
+degrees: 0.42483  # image rotation (+/- deg)
+translate: 0.07412  # image translation (+/- fraction)
 scale: 0.25  # image scale (+/- gain)
-shear: 0.0  # image shear (+/- deg)
-perspective: 0.0005  # image perspective (+/- fraction), range 0-0.001
+shear: 0.30726  # image shear (+/- deg)
+perspective: 0.00021  # image perspective (+/- fraction), range 0-0.001
 flipud: 0.0  # image flip up-down (probability)
 fliplr: 0.5  # image flip left-right (probability)
-mosaic: 1.0  # image mosaic (probability)
-mixup: 0.0  # image mixup (probability)
+mosaic: 0.69455  # image mosaic (probability)
+mixup: 0.36270  # image mixup (probability)
 copy_paste: 0.0  # segment copy-paste (probability)
-compression: 0.9  # image compression (probability)
+compression: 0.28540  # image compression (probability)
 
 # pre-augmentations (before main augmentations)
-pre_crop: 0.8  # random crop (probability)
+pre_crop: 0.60292  # random crop (probability)
 
 # iou range for mAP metrics -> torch.linspace(iouv_start, iouv_end, 10)
 iouv_start: 0.05 # COCO uses 0.5
