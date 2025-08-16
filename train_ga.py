@@ -36,7 +36,7 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
 
         for gene_name, gene_value in zip(gene_ranges.keys(), individual):
             if (gene_ranges[-1] == "log"):
-                if gene_value < 10**gene_ranges[gene_name][0] or gene_value > 10**gene_ranges[gene_name][1]:
+                if gene_value < math.exp(gene_ranges[gene_name][0]) or gene_value > math.exp(gene_ranges[gene_name][1]):
                     raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
                 gene_value = math.pow(10, gene_value)
             if gene_value < gene_ranges[gene_name][0] or gene_value > gene_ranges[gene_name][1]:
@@ -127,7 +127,7 @@ class GeneticAlgorithm:
         self.tournament_size = max(2, min(10, tournament_size))
 
         self.gene_ranges = {
-            "lr0": (-5, -2, "float", "log"),
+            "lr0": (-5, -1, "float", "log"),
             "lrf": (0.1, 0.5, "float", "linear"),
             "momentum": (0.5, 1.0, "float" "linear"),
             "weight_decay": (-5, -2, "float", "log"),
@@ -171,7 +171,7 @@ class GeneticAlgorithm:
         genome = []
         for gene, ranges in self.gene_ranges.items():
             if ranges[-1] == "log":
-                gene_value = random.uniform(int(math.log10(ranges[0])), int(math.log10(ranges[1])))
+                gene_value = random.uniform(math.exp(ranges[0]), math.exp(ranges[1])), int(math.log10(ranges[1])))
                 genome.append(gene_value)
             elif ranges[-1] == "linear":
                 gene_value = random.uniform(ranges[0], ranges[1])
