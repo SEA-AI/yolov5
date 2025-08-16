@@ -1,5 +1,6 @@
 import random
 import multiprocessing as mp
+import math
 import yaml
 import pandas as pd
 import os
@@ -122,25 +123,25 @@ class GeneticAlgorithm:
         self.tournament_size = max(2, min(10, tournament_size))
 
         self.gene_ranges = {
-            "lr0": (1e-5, 1e-2, "float"),
-            "lrf": (0.1, 0.5, "float"),
-            "momentum": (0.5, 1.0, "float"),
-            "weight_decay": (0.0, 0.001, "float"),
-            "warmup_momentum": (0.5, 1.0, "float"),
-            "warmup_bias_lr": (0.0, 0.5, "float"),
-            "hsv_h": (0.0, 0.1, "float"),  # image HSV-Hue augmentation (fraction)
-            "hsv_s": (0.0, 0.9, "float"),  # image HSV-Saturation augmentation (fraction)
-            "hsv_v": (0.0, 0.9, "float"),  # image HSV-Value augmentation (fraction)
-            "degrees": (0.0, 45.0, "float"),  # image rotation (+/- deg)
-            "translate": (0.0, 0.9, "float"),  # image translation (+/- fraction)
-            "scale": (0.0, 0.6, "float"),  # image scale (+/- gain)
-            "shear": (0.0, 20.0, "float"),  # image shear (+/- deg)
-            "perspective": (0.0, 0.001, "float"),  # image perspective (+/- fraction), range 0-0.001
-            "compression": (0.0, 1.0, "float"),
-            "mosaic": (0.0, 1.0, "float"),  # image mosaic (probability)
-            "mixup": (0.0, 0.75, "float"),  # image mixup (probability)
-            "pre_crop": (0.0, 1.0, "float"),
-            "batch_size": (8, 16, "int"),
+            "lr0": (-5, -2, "float", "log"),
+            "lrf": (0.1, 0.5, "float", "linear"),
+            "momentum": (0.5, 1.0, "float" "linear"),
+            "weight_decay": (-3, 0, "float", "log"),
+            "warmup_momentum": (0.5, 1.0, "float", "linear"),
+            "warmup_bias_lr": (0.0, 0.5, "float", "linear"),
+            "hsv_h": (0.0, 0.1, "float", "linear"),  # image HSV-Hue augmentation (fraction)
+            "hsv_s": (0.0, 0.9, "float", "linear"),  # image HSV-Saturation augmentation (fraction)
+            "hsv_v": (0.0, 0.9, "float", "linear"),  # image HSV-Value augmentation (fraction)
+            "degrees": (0.0, 45.0, "float", "linear"),  # image rotation (+/- deg)
+            "translate": (0.0, 0.9, "float", "linear"),  # image translation (+/- fraction)
+            "scale": (0.0, 0.6, "float", "linear"),  # image scale (+/- gain)
+            "shear": (0.0, 20.0, "float", "linear"),  # image shear (+/- deg)
+            "perspective": (0.0, 0.001, "float", "linear"),  # image perspective (+/- fraction), range 0-0.001
+            "compression": (0.0, 1.0, "float", "linear"),
+            "mosaic": (0.0, 1.0, "float", "linear"),  # image mosaic (probability)
+            "mixup": (0.0, 0.75, "float", "linear"),  # image mixup (probability)
+            "pre_crop": (0.0, 1.0, "float", "linear"),
+            "batch_size": (8, 16, "int", "linear"),
         }
 
         self.gene_length = len(self.gene_ranges)
@@ -165,10 +166,16 @@ class GeneticAlgorithm:
     def generate_individual(self):
         genome = []
         for gene, ranges in self.gene_ranges.items():
-            gene_value = random.uniform(ranges[0], ranges[1])
-            if ranges[2] == "int":
-                gene_value = int(gene_value)
-            genome.append(gene_value)
+            if ranges[-1] == "log":
+                gene_value = random.uniform(int(math.log10(ranges[0])), int(math.log10(ranges[1])))
+                genome.append(gene_value)
+            elif ranges[-1] == "linear":
+                gene_value = random.uniform(ranges[0], ranges[1])
+                if ranges[2] == "int":
+                    gene_value = int(gene_value)
+                genome.append(gene_value)
+            else:
+                raise ValueError(f"Invalid distribuition type: {ranges[-1]}")
         return genome
 
     def _evaluate_population(self):
