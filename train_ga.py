@@ -200,7 +200,7 @@ class GeneticAlgorithm:
                           gpu_id, 
                           return_dict, 
                           pop_idx, 
-                          "genetic-algorithm-seaai",
+                          "genetic-algorithm-seaai-2",
                           f"individual-{pop_idx}-generation-{self.generation_number}",
                           self.base_args
                           )
