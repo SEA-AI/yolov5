@@ -170,6 +170,7 @@ class GeneticAlgorithm:
     def generate_individual(self):
         genome = []
         for gene, ranges in self.gene_ranges.items():
+            print(gene, ranges)
             if ranges[-1] == "log":
                 gene_value = random.uniform(ranges[0], ranges[1])
                 gene_value = math.pow(10, gene_value)
