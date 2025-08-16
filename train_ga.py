@@ -35,6 +35,10 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
             config = yaml.safe_load(f)
 
         for gene_name, gene_value in zip(gene_ranges.keys(), individual):
+            if (gene_ranges[-1] == "log"):
+                if gene_value < 10**gene_ranges[gene_name][0] or gene_value > 10**gene_ranges[gene_name][1]:
+                    raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
+                gene_value = math.pow(10, gene_value)
             if gene_value < gene_ranges[gene_name][0] or gene_value > gene_ranges[gene_name][1]:
                 raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
 
@@ -126,7 +130,7 @@ class GeneticAlgorithm:
             "lr0": (-5, -2, "float", "log"),
             "lrf": (0.1, 0.5, "float", "linear"),
             "momentum": (0.5, 1.0, "float" "linear"),
-            "weight_decay": (-3, 0, "float", "log"),
+            "weight_decay": (-5, -2, "float", "log"),
             "warmup_momentum": (0.5, 1.0, "float", "linear"),
             "warmup_bias_lr": (0.0, 0.5, "float", "linear"),
             "hsv_h": (0.0, 0.1, "float", "linear"),  # image HSV-Hue augmentation (fraction)
