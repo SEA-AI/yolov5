@@ -129,7 +129,7 @@ class GeneticAlgorithm:
         self.gene_ranges = {
             "lr0": (-5, -1, "float", "log"),
             "lrf": (0.1, 0.5, "float", "linear"),
-            "momentum": (0.5, 1.0, "float" "linear"),
+            "momentum": (0.5, 1.0, "float", "linear"),
             "weight_decay": (-5, -2, "float", "log"),
             "warmup_momentum": (0.5, 1.0, "float", "linear"),
             "warmup_bias_lr": (0.0, 0.5, "float", "linear"),
@@ -181,7 +181,7 @@ class GeneticAlgorithm:
                     gene_value = int(gene_value)
                 genome.append(gene_value)
             else:
-                print(type(ranges), ranges, "wtf", ranges[-1], type(ranges[-1]), gene)
+                # print(type(ranges), ranges, "wtf", ranges[-1], type(ranges[-1]), gene)
                 raise ValueError(f"Invalid distribuition type: {ranges[-1]}")
         return genome
 
