@@ -36,7 +36,7 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
 
         for gene_name, gene_value in zip(gene_ranges.keys(), individual):
             if (gene_ranges[gene_name][-1] == "log"):
-                if gene_value < math.exp(gene_ranges[gene_name][0]) or gene_value > math.exp(gene_ranges[gene_name][1]):
+                if gene_value < 10**(gene_ranges[gene_name][0]) or gene_value > 10**(gene_ranges[gene_name][1]):
                     print(gene_value, math.exp(gene_ranges[gene_name][0]), math.exp(gene_ranges[gene_name][1]))
                     raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
                 gene_value = math.pow(10, gene_value)
