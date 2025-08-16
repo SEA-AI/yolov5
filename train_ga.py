@@ -180,7 +180,7 @@ class GeneticAlgorithm:
                     gene_value = int(gene_value)
                 genome.append(gene_value)
             else:
-                print(type(ranges), ranges, "wtf")
+                print(type(ranges), ranges, "wtf", ranges[-1], type(ranges[-1]))
                 raise ValueError(f"Invalid distribuition type: {ranges[-1]}")
         return genome
 
