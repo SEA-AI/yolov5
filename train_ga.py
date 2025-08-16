@@ -171,7 +171,8 @@ class GeneticAlgorithm:
         genome = []
         for gene, ranges in self.gene_ranges.items():
             if ranges[-1] == "log":
-                gene_value = random.uniform(math.exp(ranges[0]), math.exp(ranges[1])), int(math.log10(ranges[1])))
+                gene_value = random.uniform(ranges[0], ranges[1])
+                gene_value = math.pow(10, gene_value)
                 genome.append(gene_value)
             elif ranges[-1] == "linear":
                 gene_value = random.uniform(ranges[0], ranges[1])
