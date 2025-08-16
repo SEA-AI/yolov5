@@ -39,8 +39,9 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
                 if gene_value < math.exp(gene_ranges[gene_name][0]) or gene_value > math.exp(gene_ranges[gene_name][1]):
                     raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
                 gene_value = math.pow(10, gene_value)
-            if gene_value < gene_ranges[gene_name][0] or gene_value > gene_ranges[gene_name][1]:
-                raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
+            elif gene_ranges[gene_name][-1] == "linear":
+                if gene_value < gene_ranges[gene_name][0] or gene_value > gene_ranges[gene_name][1]:
+                    raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
 
             if gene_name in config:
                 config[gene_name] = gene_value
