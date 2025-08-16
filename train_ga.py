@@ -25,64 +25,64 @@ def suppress_output():
             sys.stderr = old_stderr
 
 def train_and_validate(gene_ranges, individual, device_id, return_dict, i, project_name, name, base_args):
-    # try:
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(device_id)
-    from train import run as train
+    try:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(device_id)
+        from train import run as train
 
-    kwargs = dict()
+        kwargs = dict()
 
-    with open("/home/ubuntu/yolov5/data/hyps/hyp.sea-ai.yaml", "r") as f:
-        config = yaml.safe_load(f)
+        with open("/home/ubuntu/yolov5/data/hyps/hyp.sea-ai.yaml", "r") as f:
+            config = yaml.safe_load(f)
 
-    for gene_name, gene_value in zip(gene_ranges.keys(), individual):
-        if (gene_ranges[-1] == "log"):
-            if gene_value < math.exp(gene_ranges[gene_name][0]) or gene_value > math.exp(gene_ranges[gene_name][1]):
+        for gene_name, gene_value in zip(gene_ranges.keys(), individual):
+            if (gene_ranges[gene_name][-1] == "log"):
+                if gene_value < math.exp(gene_ranges[gene_name][0]) or gene_value > math.exp(gene_ranges[gene_name][1]):
+                    raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
+                gene_value = math.pow(10, gene_value)
+            if gene_value < gene_ranges[gene_name][0] or gene_value > gene_ranges[gene_name][1]:
                 raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
-            gene_value = math.pow(10, gene_value)
-        if gene_value < gene_ranges[gene_name][0] or gene_value > gene_ranges[gene_name][1]:
-            raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
 
-        if gene_name in config:
-            config[gene_name] = gene_value
-        else:
-            kwargs[gene_name] = gene_value
+            if gene_name in config:
+                config[gene_name] = gene_value
+            else:
+                kwargs[gene_name] = gene_value
 
-    # Merge base args
-    kwargs.update(base_args)
+        # Merge base args
+        kwargs.update(base_args)
 
-    with suppress_output():
-        train_data = train(hyp=config, 
-                            device=device_id, 
-                            project=project_name, 
-                            name=name, 
-                            data = "data/sea-ai-hyp-search.yaml",
-                            # data = "data/coco128.yaml",
-                            **kwargs)
+        with suppress_output():
+            train_data = train(hyp=config, 
+                                device=device_id, 
+                                project=project_name, 
+                                name=name, 
+                                data = "data/sea-ai-hyp-search.yaml",
+                                # data = "data/coco128.yaml",
+                                **kwargs)
 
-    save_dir = train_data.save_dir
-    with open(os.path.join(save_dir, "results.csv"), "r") as f:
-        data = pd.read_csv(f)
+        save_dir = train_data.save_dir
+        with open(os.path.join(save_dir, "results.csv"), "r") as f:
+            data = pd.read_csv(f)
 
-    data["f1"] = 2 * data["   metrics/precision"] * data["      metrics/recall"] / (
-        data["   metrics/precision"] + data["      metrics/recall"])
+        data["f1"] = 2 * data["   metrics/precision"] * data["      metrics/recall"] / (
+            data["   metrics/precision"] + data["      metrics/recall"])
 
-    max_map_epoch = data["metrics/mAP_0.05:0.95"].idxmax()
+        max_map_epoch = data["metrics/mAP_0.05:0.95"].idxmax()
 
-    return_dict[i] = {
-        "map05_95": data["metrics/mAP_0.05:0.95"][max_map_epoch],
-        "map_05": data["    metrics/mAP_0.05"][max_map_epoch],
-        "pr": data["   metrics/precision"][max_map_epoch],
-        "rc": data["      metrics/recall"][max_map_epoch],
-        "f1": data["f1"][max_map_epoch],
-    }
+        return_dict[i] = {
+            "map05_95": data["metrics/mAP_0.05:0.95"][max_map_epoch],
+            "map_05": data["    metrics/mAP_0.05"][max_map_epoch],
+            "pr": data["   metrics/precision"][max_map_epoch],
+            "rc": data["      metrics/recall"][max_map_epoch],
+            "f1": data["f1"][max_map_epoch],
+        }
 
-    print(f"✅ Process {i} finished successfully", flush=True)
+        print(f"✅ Process {i} finished successfully", flush=True)
 
-    # except Exception as e:
-    #     print(f"❌ Exception in process {i} on device {device_id}: {e}", flush=True)
-    #     return_dict[i] = {
-    #         "map05_95": 0.0, "map_05": 0.0, "pr": 0.0, "rc": 0.0, "f1": 0.0
-    #     }
+    except Exception as e:
+        print(f"❌ Exception in process {i} on device {device_id}: {e}", flush=True)
+        return_dict[i] = {
+            "map05_95": 0.0, "map_05": 0.0, "pr": 0.0, "rc": 0.0, "f1": 0.0
+        }
 
 
 class GeneticAlgorithm:
