@@ -11,8 +11,8 @@ names:
   9: SHIP
 
 train: 
-  - /home/ubuntu/datasets/TRAIN_RGB_ALL_2025_06_IMAGE_BB_CV_2025-08-16/images/train/
+  - /home/ubuntu/datasets/TRAIN_RGB_ALL_2025_06_IMAGE_BB_CV_2025-08-18/images/train/
   - /home/ubuntu/datasets/TRAIN_THERMAL_ALL_2025_06_IMAGE_BB_CV_2025-08-16/images/train/
 val: 
-  - /home/ubuntu/datasets/TRAIN_RGB_ALL_2025_06_IMAGE_BB_CV_2025-08-16/images/val/
+  - /home/ubuntu/datasets/TRAIN_RGB_ALL_2025_06_IMAGE_BB_CV_2025-08-18/images/val/
   - /home/ubuntu/datasets/TRAIN_THERMAL_ALL_2025_06_IMAGE_BB_CV_2025-08-16/images/val/
