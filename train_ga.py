@@ -170,6 +170,7 @@ class GeneticAlgorithm:
             if ranges[2] == "int":
                 gene_value = int(gene_value)
             genome.append(gene_value)
+        print("GENOME", genome)
         return genome
             
     def _initialize_population(self):
