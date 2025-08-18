@@ -52,6 +52,9 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
         # Merge base args
         kwargs.update(base_args)
 
+        print("CONFIIIG ", config)
+        print("KWARGS", kwargs)
+
         with suppress_output():
             train_data = train(hyp=config, 
                                 device=device_id, 
