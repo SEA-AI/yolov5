@@ -118,6 +118,8 @@ class GeneticAlgorithm:
         if self.num_gpus == 0:
             raise RuntimeError("No GPUs detected!")
         
+        self.num_gpus = 1
+        
         self.generation_number = 0
 
         # Dynamic population size if not provided
@@ -161,6 +163,7 @@ class GeneticAlgorithm:
         genome = []
         for gene, ranges in self.gene_ranges.items():
             gene_value = random.uniform(ranges[0], ranges[1]) if gene not in self.base_hyp.keys() else self.base_hyp[gene]
+            print(gene_value)
             if ranges[2] == "int":
                 gene_value = int(gene_value)
             genome.append(gene_value)
