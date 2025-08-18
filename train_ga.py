@@ -26,8 +26,6 @@ def suppress_output():
 
 def train_and_validate(gene_ranges, individual, device_id, return_dict, i, project_name, name, base_args):
     try:
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(device_id)
-        from train import run as train
 
         kwargs = dict()
 
@@ -55,6 +53,9 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
         print("CONFIIIG ", config)
         print("KWARGS", kwargs)
 
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(device_id)
+        from train import run as train
+        
         with suppress_output():
             train_data = train(hyp=config, 
                                 device=device_id, 
