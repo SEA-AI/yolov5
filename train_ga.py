@@ -37,7 +37,6 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
                 if gene_value < 10**(gene_ranges[gene_name][0]) or gene_value > 10**(gene_ranges[gene_name][1]):
                     print("DEBUUUUG", gene_value, math.exp(gene_ranges[gene_name][0]), math.exp(gene_ranges[gene_name][1]))
                     raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
-                gene_value = math.pow(10, gene_value)
             elif gene_ranges[gene_name][-1] == "linear":
                 if gene_value < gene_ranges[gene_name][0] or gene_value > gene_ranges[gene_name][1]:
                     raise ValueError(f"Invalid value {gene_value} for gene {gene_name}")
@@ -55,7 +54,7 @@ def train_and_validate(gene_ranges, individual, device_id, return_dict, i, proje
 
         os.environ["CUDA_VISIBLE_DEVICES"] = str(device_id)
         from train import run as train
-        
+
         with suppress_output():
             train_data = train(hyp=config, 
                                 device=device_id, 
