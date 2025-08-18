@@ -209,6 +209,7 @@ class GeneticAlgorithm:
                 print(f"\n          🧑 INDIVIDUAL {pop_idx} running in device {i}\n")
                 individual = self.population[pop_idx]
                 gpu_id = i  # because we cycle over num_gpus at each batch
+                print("INDIVIDUAL", individual)
                 p = mp.Process(
                     target=train_and_validate,
                     args=(self.gene_ranges, 
