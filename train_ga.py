@@ -104,7 +104,7 @@ class GeneticAlgorithm:
                      "imgsz": 1280,
                      "epochs": 20,
                      "weights": "yolov5s.pt",
-                     "batch_size": -1,
+                     "batch_size": 8,
                      "single_cls": False,
                      "multi_scale": False,
                      "close_mosaic": 5,
@@ -153,7 +153,6 @@ class GeneticAlgorithm:
             "mosaic": (0.0, 1.0, "float", "linear"),  # image mosaic (probability)
             "mixup": (0.0, 0.75, "float", "linear"),  # image mixup (probability)
             "pre_crop": (0.0, 1.0, "float", "linear"),
-            "batch_size": (8, 16, "int", "linear"),
         }
 
         self.gene_length = len(self.gene_ranges)
@@ -285,6 +284,7 @@ base_args = {
     "multi_scale": False,
     "close_mosaic": 5,
     "single_cls_val": True,
+    "batch_size": 8
 }
 
 ga = GeneticAlgorithm(
