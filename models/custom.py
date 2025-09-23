@@ -1,20 +1,19 @@
 from pathlib import Path
-from typing import Union, Tuple, Optional
+from typing import Optional, Tuple, Union
 
 import numpy as np
 import torch
 from torch import nn
 from torchvision import transforms
-
 from ultralytics import YOLO
 from ultralytics.nn.tasks import BaseModel as UBaseModel
 
-from utils.general import LOGGER, scale_boxes
-from utils.plots import feature_visualization
-from utils.torch_utils import select_device
 from models.common import Classify, DetectMultiBackend
 from models.experimental import attempt_load
-from models.yolo import BaseModel, DetectionModel, Detect
+from models.yolo import BaseModel, Detect, DetectionModel
+from utils.general import LOGGER, scale_boxes
+from utils.plots import feature_visualization
+from utils.torch_utils import is_obb_weights, select_device
 
 
 class OBBModel(UBaseModel):
@@ -367,7 +366,8 @@ class AHOY(nn.Module):
         Returns:
             An instance of either AHOYv1 or AHOYv2 based on the model path.
         """
-        if any(x in hor_det_weights.lower() for x in ("obb")):
+
+        if is_obb_weights(hor_det_weights):
             return super().__new__(AHOYv2)
         return super().__new__(AHOYv1)
 

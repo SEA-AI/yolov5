@@ -17,6 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.transforms import Resize
+from ultralytics.nn.tasks import OBBModel
 
 from utils.general import LOGGER, check_version, colorstr, file_date, git_describe
 
@@ -502,3 +503,13 @@ def get_resize_info(model_or_transform):
         "interpolation": resize_transform.interpolation.name.lower(),
         "antialias": resize_transform.antialias
     }
+
+
+def is_obb_weights(path: str) -> bool:
+    """
+    Checks if the model is an OBBModel by loading the checkpoint and checking the type of the model.
+    """
+    checkpoint = torch.load(path, map_location='cpu')
+    model = checkpoint.get('model', checkpoint)
+
+    return isinstance(model, OBBModel)

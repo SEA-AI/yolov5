@@ -45,14 +45,18 @@ from utils.general import LOGGER
 
 
 def get_weights_path(weights_path: str) -> str:
-    """Get model weights from local path or W&B registry.
+    """Get model weights from local path or W&B registry/run.
 
     Args:
-        weights_path: Local path or W&B artifact in format <collection_name>:<version>
+        weights_path: Local path or W&B artifact in format:
+                     - <collection_name>:<version> (for registry)
+                     - <entity>/<project>/<artifact_name>:<version> (for run)
 
     Returns:
         Path to model weights file
     """
+    
+    # Check if it's a local file first
     if Path(weights_path).exists():
         return weights_path
 
@@ -62,18 +66,33 @@ def get_weights_path(weights_path: str) -> str:
         LOGGER.error("Please install wandb to download models from W&B registry")
         return weights_path
 
+    api = wandb.Api()
+    
+    # Try registry first (format: collection:version)
+    if ":" in weights_path and "/" not in weights_path.split(":")[0]:
+        try:
+            collection, version = weights_path.split(":")
+            artifact_name = f"wandb-registry-model/{collection}:{version}"
+            LOGGER.info(f"Attempting to download from registry: {artifact_name}")
+            
+            artifact_path = api.artifact(name=artifact_name).download(
+                root=Path("artifacts", weights_path)
+            )
+            return str(next(Path(artifact_path).glob("*.pt")))
+            
+        except Exception as e:
+            LOGGER.warning(f"Failed to download from registry: {e}")
+    
+    # Try as direct run artifact (format: entity/project/artifact:version)
     try:
-        REGISTRY = "model"
-        collection, version = weights_path.split(":")
-
-        api = wandb.Api()
-        artifact_name = f"wandb-registry-{REGISTRY}/{collection}:{version}"
-        artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
+        LOGGER.info(f"Attempting to download as run artifact: {weights_path}")
+        artifact_path = api.artifact(name=weights_path).download(
+            root=Path("artifacts", weights_path.replace("/", "_").replace(":", "_"))
+        )
         return str(next(Path(artifact_path).glob("*.pt")))
-
+        
     except Exception as e:
-        LOGGER.error(f"Failed to download from W&B: {str(e)}")
-        raise e
+        LOGGER.error(f"Failed to download from W&B run: {e}")
 
 
 def _transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
