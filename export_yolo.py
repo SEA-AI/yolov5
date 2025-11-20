@@ -35,8 +35,7 @@ import argparse
 from typing import Tuple
 
 from export_utils import export_model_to_onnx, get_weights_path, transform_sz
-from models.custom import YOLO
-
+from models.custom import SeaYOLO
 
 def main(
     weights: str,
@@ -56,7 +55,7 @@ def main(
     infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
     weights = get_weights_path(weights)
 
-    model = YOLO(
+    model = SeaYOLO(
         weights=weights,
         fp16=half,
         fuse=fuse,
