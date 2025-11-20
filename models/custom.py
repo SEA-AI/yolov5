@@ -345,50 +345,42 @@ class ObjectsModel(BaseModel):
                 m.export = True
 
 
-class AHOY(nn.Module):
-    """Base class for AHOY models.
-
-    AHOY Stands for the following:
-    - **A**
-    - **H**orizon and
-    - **O**bject detection
-    - **Y**olo-based model
+class SeaYOLO(nn.Module):
+    """Custom YOLO model with preprocessing and postprocessing hooks for Sea.AI.
+    
+    This is a simplified version of AHOY that only includes object detection
+    (no horizon detection). It provides:
+    - Automatic preprocessing (normalization, optional resizing/padding)
+    - Postprocessing hooks (type conversion, box scaling)
+    - Export preparation
     """
 
-    def __new__(cls, hor_det_weights: str, **kwargs):
-        """Create the appropriate AHOY model instance based on the model path.
-
-        Args:
-            model_path: Path to the model file.
-            device: CUDA device to use.
-            **kwargs: Additional arguments passed to the constructor.
-
-        Returns:
-            An instance of either AHOYv1 or AHOYv2 based on the model path.
-        """
-
-        if is_obb_weights(hor_det_weights):
-            return super().__new__(AHOYv2)
-        return super().__new__(AHOYv1)
-
-    # Ensemble of models
     def __init__(
         self,
-        obj_det_weigths: str,
-        hor_det_weights: str,
+        weights: str,
         device: Union[str, torch.device] = None,  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
         imgsz: Tuple[int, int] = (640, 640),
         infsz: Optional[Tuple[int, int]] = None,
     ):
+        """Initialize SeaYOLO model.
+        
+        Args:
+            weights: Path to model weights file
+            device: Device to run model on (automatically selected if None)
+            fp16: Use half precision (fp16)
+            fuse: Fuse conv and batch norm layers
+            imgsz: Input image size (height, width)
+            infsz: Inference size (height, width). If different from imgsz,
+                   the model will apply resize/padding transformations
+        """
         super().__init__()
-        self.obj_det = self.load_obj_det(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
-        self.hor_det = self.load_hor_det(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
-        self.device = self.obj_det.device
+        self.model = self.load_model(weights, device=device, fp16=fp16, fuse=fuse)
+        self.device = self.model.device
         self.fp16 = fp16
-        self.stride = self.obj_det.stride
-        self.names = self.obj_det.names
+        self.stride = self.model.stride
+        self.names = self.model.names
         self.imgsz = imgsz
         self.infsz = infsz if infsz is not None else imgsz
 
@@ -399,33 +391,24 @@ class AHOY(nn.Module):
         self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
 
         LOGGER.debug(
-            f"Object detection model info: "
-            f"model.type={type(self.obj_det.model).__name__}, "
-            f"save={self.obj_det.save}, "
-            f"stride={self.obj_det.stride}"
-        )
-        LOGGER.debug(
-            f"Horizon detection model info: "
-            f"model.type={type(self.hor_det.model).__name__}, "
-            f"save={self.hor_det.save}, "
-            f"stride={self.hor_det.stride}"
+            f"SeaYOLO model info: "
+            f"model.type={type(self.model.model).__name__}, "
+            f"save={self.model.save}, "
+            f"stride={self.model.stride}"
         )
 
-    def load_obj_det(
-        self, obj_det_weigths: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
+    def load_model(
+        self, weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
     ):
         """Load object detection model."""
-        return ObjectsModel(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
-
-    def load_hor_det(
-        self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
-    ):
-        """Load horizon detection model."""
-        raise NotImplementedError("Subclasses should implement this method")
+        return ObjectsModel(weights, device=device, fp16=fp16, fuse=fuse)
 
     def forward(self, x, profile=False, visualize=False):
-        """Forward pass through models."""
-        raise NotImplementedError("Subclasses should implement this method")
+        """Forward pass through model.
+        
+        Returns detections.
+        """
+        return self.model(x, profile, visualize)
 
     def register_preprocessing_hook(self):
         """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
@@ -456,7 +439,7 @@ class AHOY(nn.Module):
         if imgsz == infsz or infsz is None:
             return None, None
 
-        pad_left, pad_right, pad_top, pad_bottom = AHOY.get_padding_for_aspect_ratio(imgsz, infsz)
+        pad_left, pad_right, pad_top, pad_bottom = SeaYOLO.get_padding_for_aspect_ratio(imgsz, infsz)
         ratio = max(imgsz[0] / infsz[0], imgsz[1] / infsz[1])
         ratio_pad = [[1 / ratio], [pad_left, pad_top]]  # [[gain], [pad_x, pad_y]] for scale_boxes
         transform = transforms.Compose([])
@@ -526,11 +509,127 @@ class AHOY(nn.Module):
 
     @staticmethod
     def _postprocessing_hook(module, inputs, outputs):
+        """Convert outputs to float (if needed) and scale back boxes if transform was applied."""
+
+        def _to_float(x):
+            return x.float() if module.fp16 else x
+
+        # outputs is the detection tuple from forward method
+        detections = outputs
+
+        # Scale back boxes if transform was applied
+        if module.ratio_pad is not None:
+            detections = (
+                scale_boxes(module.infsz, detections[0], module.imgsz, ratio_pad=module.ratio_pad),
+            ) + detections[1:]
+
+        # Convert first item (detection outputs) to float if needed
+        detections = (_to_float(detections[0]),) + detections[1:]
+
+        return detections
+
+    def prepare_for_export(self, dynamic: bool = False):
+        """Prepare model for export."""
+        LOGGER.info(f"✨ Preparing {self.model.__class__.__name__} for export...")
+        self.model.prepare_for_export(dynamic)
+
+
+class AHOY(SeaYOLO):
+    """Base class for AHOY models that extends SeaYOLO with horizon detection.
+
+    AHOY Stands for the following:
+    - **A**
+    - **H**orizon and
+    - **O**bject detection
+    - **Y**olo-based model
+    
+    This class inherits all preprocessing, hook management, and transform logic
+    from SeaYOLO and adds horizon detection capabilities.
+    """
+
+    def __new__(cls, hor_det_weights: str, **kwargs):
+        """Create the appropriate AHOY model instance based on the model path.
+
+        Args:
+            hor_det_weights: Path to the horizon detection model file.
+            **kwargs: Additional arguments passed to the constructor.
+
+        Returns:
+            An instance of either AHOYv1 or AHOYv2 based on the model path.
+        """
+
+        if is_obb_weights(hor_det_weights):
+            return super().__new__(AHOYv2)
+        return super().__new__(AHOYv1)
+
+    def __init__(
+        self,
+        obj_det_weigths: str,
+        hor_det_weights: str,
+        device: Union[str, torch.device] = None,  # automatically select device
+        fp16: bool = False,
+        fuse: bool = True,  # fuse conv and bn layers
+        imgsz: Tuple[int, int] = (640, 640),
+        infsz: Optional[Tuple[int, int]] = None,
+    ):
+        """Initialize AHOY model with object detection and horizon detection.
+        
+        Args:
+            obj_det_weigths: Path to object detection model weights
+            hor_det_weights: Path to horizon detection model weights
+            device: Device to run models on (automatically selected if None)
+            fp16: Use half precision (fp16)
+            fuse: Fuse conv and batch norm layers
+            imgsz: Input image size (height, width)
+            infsz: Inference size (height, width). If different from imgsz,
+                   the model will apply resize/padding transformations
+        """
+        # Initialize parent YOLO class with object detection weights
+        super().__init__(
+            weights=obj_det_weigths,
+            device=device,
+            fp16=fp16,
+            fuse=fuse,
+            imgsz=imgsz,
+            infsz=infsz,
+        )
+        
+        # Store reference to object detection model (already loaded by parent)
+        self.obj_det = self.model
+        
+        # Load horizon detection model
+        self.hor_det = self.load_hor_det(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
+
+        LOGGER.debug(
+            f"Object detection model info: "
+            f"model.type={type(self.obj_det.model).__name__}, "
+            f"save={self.obj_det.save}, "
+            f"stride={self.obj_det.stride}"
+        )
+        LOGGER.debug(
+            f"Horizon detection model info: "
+            f"model.type={type(self.hor_det.model).__name__}, "
+            f"save={self.hor_det.save}, "
+            f"stride={self.hor_det.stride}"
+        )
+
+    def load_hor_det(
+        self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
+    ):
+        """Load horizon detection model."""
+        raise NotImplementedError("Subclasses should implement this method")
+
+    def forward(self, x, profile=False, visualize=False):
+        """Forward pass through models."""
+        raise NotImplementedError("Subclasses should implement this method")
+
+    @staticmethod
+    def _postprocessing_hook(module, inputs, outputs):
         """Convert outputs to float (if needed) and apply softmax to logits."""
         raise NotImplementedError("Subclasses should implement this method")
 
     def prepare_for_export(self, dynamic: bool = False):
-        """Prepare model for export."""
+        """Prepare both object detection and horizon detection models for export."""
         LOGGER.info(f"✨ Preparing {self.obj_det.__class__.__name__} for export...")
         self.obj_det.prepare_for_export(dynamic)
         LOGGER.info(f"✨ Preparing {self.hor_det.__class__.__name__} for export...")

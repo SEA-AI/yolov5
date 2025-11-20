@@ -1,5 +1,5 @@
 """
-Export AHOY to ONNX format.
+Export YOLO to ONNX format.
 
 ONNX is an open standard for machine learning models that enables interoperability 
 between different frameworks and platforms.
@@ -10,25 +10,23 @@ including TensorRT for optimized GPU inference.
 
 Example:
     # Using local weights files:
-    python export_ahoy.py \
-        --det-weights yolov5n.pt \
-        --hor-weights yolov11n-obb.pt \
+    python export_yolo.py \
+        --weights yolov5n.pt \
         --imgsz 640 \
-        --infsz 320
+        --infsz 320 \
         --batch-size 2 \
         --fuse \
         --half \
-        --fname ahoy.onnx
+        --fname yolo.onnx
 
     # Using W&B artifacts:
-    python export_ahoy.py \
-        --det-weights YOLOv5n-IR:latest \
-        --hor-weights YOLOv5h-IR:latest \
+    python export_yolo.py \
+        --weights YOLOv5n-IR:latest \
         --imgsz 640 \
         --batch-size 2 \
         --fuse \
         --half \
-        --fname ahoy.onnx
+        --fname yolo.onnx
 
 NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 """
@@ -37,12 +35,11 @@ import argparse
 from typing import Tuple
 
 from export_utils import export_model_to_onnx, get_weights_path, transform_sz
-from models.custom import AHOY
+from models.custom import YOLO
 
 
 def main(
-    det_weights: str,
-    hor_weights: str,
+    weights: str,
     imgsz: int | Tuple[int, int],
     infsz: int | Tuple[int, int] | None,
     batch_size: int,
@@ -53,16 +50,14 @@ def main(
     trt7_compatible: bool = False,
     fname: str = "",
 ):
-    """Export the AHOY model to ONNX format."""
+    """Export the YOLO model to ONNX format."""
     # Transform image size to (height, width) format
     imgsz = transform_sz(imgsz)
     infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
-    det_weights = get_weights_path(det_weights)
-    hor_weights = get_weights_path(hor_weights)
+    weights = get_weights_path(weights)
 
-    model = AHOY(
-        obj_det_weigths=det_weights,
-        hor_det_weights=hor_weights,
+    model = YOLO(
+        weights=weights,
         fp16=half,
         fuse=fuse,
         imgsz=imgsz,
@@ -83,18 +78,11 @@ def main(
 def _parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
-        "-dw",
-        "--det-weights",
+        "-w",
+        "--weights",
         type=str,
         required=True,
-        help="Path to the detection model weights.",
-    )
-    parser.add_argument(
-        "-hw",
-        "--hor-weights",
-        type=str,
-        required=True,
-        help="Path to the horizontal model weights.",
+        help="Path to the model weights or W&B artifact (e.g., 'YOLOv5n-IR:latest').",
     )
     parser.add_argument("-sz", "--imgsz", nargs="+", type=int, default=[640, 640], help="image input shape (h, w)")
     parser.add_argument(
@@ -130,6 +118,12 @@ def _parse_args():
         help="Simplify the exported model.",
     )
     parser.add_argument(
+        "-dy",
+        "--dynamic",
+        action="store_true",
+        help="Export with dynamic batch size.",
+    )
+    parser.add_argument(
         "-trt7",
         "--trt7-compatible",
         action="store_true",
@@ -148,3 +142,4 @@ def _parse_args():
 if __name__ == "__main__":
     args = _parse_args()
     main(**vars(args))
+
