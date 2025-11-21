@@ -10,7 +10,7 @@ including TensorRT for optimized GPU inference.
 
 Example:
     # Using local weights files:
-    python export_ahoy.py \
+    python export/ahoy.py \
         --det-weights yolov5n.pt \
         --hor-weights yolov11n-obb.pt \
         --imgsz 640 \
@@ -21,7 +21,7 @@ Example:
         --fname ahoy.onnx
 
     # Using W&B artifacts:
-    python export_ahoy.py \
+    python export/ahoy.py \
         --det-weights YOLOv5n-IR:latest \
         --hor-weights YOLOv5h-IR:latest \
         --imgsz 640 \
@@ -34,11 +34,17 @@ NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 """
 
 import argparse
+import sys
+from pathlib import Path
 from typing import Tuple
 
-from export_utils import export_model_to_onnx, get_weights_path, transform_sz
-from models.custom import AHOY
+FILE = Path(__file__).resolve()
+ROOT = FILE.parents[1]  # YOLOv5 root directory
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))  # add ROOT to PATH
 
+from utils.export import get_weights_path, transform_sz, export_model_to_onnx
+from models.custom import AHOY
 
 
 def main(
