@@ -383,6 +383,8 @@ class AHOY(nn.Module):
         infsz: Optional[Tuple[int, int]] = None,
     ):
         super().__init__()
+        self.obj_det_weights = obj_det_weigths
+        self.hor_det_weights = hor_det_weights
         self.obj_det = self.load_obj_det(obj_det_weigths, device=device, fp16=fp16, fuse=fuse)
         self.hor_det = self.load_hor_det(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
         self.device = self.obj_det.device
@@ -512,7 +514,7 @@ class AHOY(nn.Module):
     def _preprocessing_hook(module, inputs):
         """Add preprocessing operations to be part of the model."""
 
-        def _preprocess(x):
+        def _preprocess(x: torch.Tensor):
             if len(x.shape) < 1:
                 return x
             if module.transform is not None:
