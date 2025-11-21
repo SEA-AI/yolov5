@@ -596,7 +596,8 @@ class AHOY(SeaYOLO):
         )
         
         # Load horizon detection model
-        self.hor_det = self.load_hor_det(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
+        self.hor_det_weights = hor_det_weights
+        self.hor_det = self.load_hor_det(self.hor_det_weights, device=device, fp16=fp16, fuse=fuse)
 
         LOGGER.debug(
             f"Object detection model info: "
