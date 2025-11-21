@@ -357,7 +357,7 @@ class SeaYOLO(nn.Module):
 
     def __init__(
         self,
-        weights: str,
+        obj_det_weights: str,
         device: Union[str, torch.device] = None,  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
@@ -367,7 +367,7 @@ class SeaYOLO(nn.Module):
         """Initialize SeaYOLO model.
         
         Args:
-            weights: Path to model weights file
+            obj_det_weights: Path to model weights file
             device: Device to run model on (automatically selected if None)
             fp16: Use half precision (fp16)
             fuse: Fuse conv and batch norm layers
@@ -376,11 +376,12 @@ class SeaYOLO(nn.Module):
                    the model will apply resize/padding transformations
         """
         super().__init__()
-        self.model = self.load_model(weights, device=device, fp16=fp16, fuse=fuse)
-        self.device = self.model.device
+        self.obj_det_weights = obj_det_weights
+        self.obj_det = self.load_obj_det(self.obj_det_weights, device=device, fp16=fp16, fuse=fuse)
+        self.device = self.obj_det.device
         self.fp16 = fp16
-        self.stride = self.model.stride
-        self.names = self.model.names
+        self.stride = self.obj_det.stride
+        self.names = self.obj_det.names
         self.imgsz = imgsz
         self.infsz = infsz if infsz is not None else imgsz
 
@@ -392,12 +393,12 @@ class SeaYOLO(nn.Module):
 
         LOGGER.debug(
             f"SeaYOLO model info: "
-            f"model.type={type(self.model.model).__name__}, "
-            f"save={self.model.save}, "
-            f"stride={self.model.stride}"
+            f"model.type={type(self.obj_det.model).__name__}, "
+            f"save={self.obj_det.save}, "
+            f"stride={self.obj_det.stride}"
         )
 
-    def load_model(
+    def load_obj_det(
         self, weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
     ):
         """Load object detection model."""
@@ -408,7 +409,7 @@ class SeaYOLO(nn.Module):
         
         Returns detections.
         """
-        return self.model(x, profile, visualize)
+        return self.obj_det(x, profile, visualize)
 
     def register_preprocessing_hook(self):
         """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
@@ -495,7 +496,7 @@ class SeaYOLO(nn.Module):
     def _preprocessing_hook(module, inputs):
         """Add preprocessing operations to be part of the model."""
 
-        def _preprocess(x):
+        def _preprocess(x: torch.Tensor):
             if len(x.shape) < 1:
                 return x
             if module.transform is not None:
@@ -530,8 +531,8 @@ class SeaYOLO(nn.Module):
 
     def prepare_for_export(self, dynamic: bool = False):
         """Prepare model for export."""
-        LOGGER.info(f"✨ Preparing {self.model.__class__.__name__} for export...")
-        self.model.prepare_for_export(dynamic)
+        LOGGER.info(f"✨ Preparing {self.obj_det.__class__.__name__} for export...")
+        self.obj_det.prepare_for_export(dynamic)
 
 
 class AHOY(SeaYOLO):
@@ -564,7 +565,7 @@ class AHOY(SeaYOLO):
 
     def __init__(
         self,
-        obj_det_weigths: str,
+        obj_det_weights: str,
         hor_det_weights: str,
         device: Union[str, torch.device] = None,  # automatically select device
         fp16: bool = False,
@@ -575,7 +576,7 @@ class AHOY(SeaYOLO):
         """Initialize AHOY model with object detection and horizon detection.
         
         Args:
-            obj_det_weigths: Path to object detection model weights
+            obj_det_weights: Path to object detection model weights
             hor_det_weights: Path to horizon detection model weights
             device: Device to run models on (automatically selected if None)
             fp16: Use half precision (fp16)
@@ -586,16 +587,13 @@ class AHOY(SeaYOLO):
         """
         # Initialize parent YOLO class with object detection weights
         super().__init__(
-            weights=obj_det_weigths,
+            obj_det_weights=obj_det_weights,
             device=device,
             fp16=fp16,
             fuse=fuse,
             imgsz=imgsz,
             infsz=infsz,
         )
-        
-        # Store reference to object detection model (already loaded by parent)
-        self.obj_det = self.model
         
         # Load horizon detection model
         self.hor_det = self.load_hor_det(hor_det_weights, device=device, fp16=fp16, fuse=fuse)

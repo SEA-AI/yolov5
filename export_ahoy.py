@@ -40,6 +40,7 @@ from export_utils import export_model_to_onnx, get_weights_path, transform_sz
 from models.custom import AHOY
 
 
+
 def main(
     det_weights: str,
     hor_weights: str,
@@ -61,7 +62,7 @@ def main(
     hor_weights = get_weights_path(hor_weights)
 
     model = AHOY(
-        obj_det_weigths=det_weights,
+        obj_det_weights=det_weights,
         hor_det_weights=hor_weights,
         fp16=half,
         fuse=fuse,

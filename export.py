@@ -376,22 +376,21 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
 
     # Metadata
     if isinstance(model, DAN):
-
         resize_info = [get_resize_info(model.model_a), get_resize_info(model_or_transform=model.model_b)]
-
         d = {
             "stride": [int(max(model.model_a.stride)), int(max(model.model_b.stride))],
             "names": [model.model_a.names, model.model_b.names],
-            "resize": resize_info if any(resize_info) else None
-
+            "resize": resize_info if any(resize_info) else None,
+            "det_weights": [getattr(model.model_a, "obj_det_weights", None), getattr(model.model_b, "obj_det_weights", None)],
+            "hor_weights": [getattr(model.model_a, "hor_det_weights", None), getattr(model.model_b, "hor_det_weights", None)],
         }
-        
     else:
-        
         d = {
             "stride": int(max(model.stride)),
             "names": model.names,
-            "resize": get_resize_info(model)
+            "resize": get_resize_info(model),
+            "det_weights": getattr(model, "obj_det_weights", None),
+            "hor_weights": getattr(model, "hor_det_weights", None),
         }
         
     for k, v in {k: v for k, v in d.items() if v}.items():

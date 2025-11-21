@@ -11,7 +11,7 @@ including TensorRT for optimized GPU inference.
 Example:
     # Using local weights files:
     python export_yolo.py \
-        --weights yolov5n.pt \
+        --det_weights yolov5n.pt \
         --imgsz 640 \
         --infsz 320 \
         --batch-size 2 \
@@ -21,7 +21,7 @@ Example:
 
     # Using W&B artifacts:
     python export_yolo.py \
-        --weights YOLOv5n-IR:latest \
+        --det_weights YOLOv5n-IR:latest \
         --imgsz 640 \
         --batch-size 2 \
         --fuse \
@@ -38,7 +38,7 @@ from export_utils import export_model_to_onnx, get_weights_path, transform_sz
 from models.custom import SeaYOLO
 
 def main(
-    weights: str,
+    det_weights: str,
     imgsz: int | Tuple[int, int],
     infsz: int | Tuple[int, int] | None,
     batch_size: int,
@@ -53,10 +53,10 @@ def main(
     # Transform image size to (height, width) format
     imgsz = transform_sz(imgsz)
     infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
-    weights = get_weights_path(weights)
+    det_weights = get_weights_path(det_weights)
 
     model = SeaYOLO(
-        weights=weights,
+        obj_det_weights=det_weights,
         fp16=half,
         fuse=fuse,
         imgsz=imgsz,
@@ -77,11 +77,11 @@ def main(
 def _parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
-        "-w",
-        "--weights",
+        "-dw",
+        "--det-weights",
         type=str,
         required=True,
-        help="Path to the model weights or W&B artifact (e.g., 'YOLOv5n-IR:latest').",
+        help="Path to the object detection model weights or W&B artifact (e.g., 'YOLOv5n-IR:latest').",
     )
     parser.add_argument("-sz", "--imgsz", nargs="+", type=int, default=[640, 640], help="image input shape (h, w)")
     parser.add_argument(

@@ -25,7 +25,7 @@ def get_weights_path(weights_path: str) -> str:
     Returns:
         Path to model weights file
     """
-    
+
     # Check if it's a local file first
     if Path(weights_path).exists():
         return weights_path
@@ -37,22 +37,20 @@ def get_weights_path(weights_path: str) -> str:
         return weights_path
 
     api = wandb.Api()
-    
+
     # Try registry first (format: collection:version)
     if ":" in weights_path and "/" not in weights_path.split(":")[0]:
         try:
             collection, version = weights_path.split(":")
             artifact_name = f"wandb-registry-model/{collection}:{version}"
             LOGGER.info(f"Attempting to download from registry: {artifact_name}")
-            
-            artifact_path = api.artifact(name=artifact_name).download(
-                root=Path("artifacts", weights_path)
-            )
+
+            artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
             return str(next(Path(artifact_path).glob("*.pt")))
-            
+
         except Exception as e:
             LOGGER.warning(f"Failed to download from registry: {e}")
-    
+
     # Try as direct run artifact (format: entity/project/artifact:version)
     try:
         LOGGER.info(f"Attempting to download as run artifact: {weights_path}")
@@ -60,9 +58,10 @@ def get_weights_path(weights_path: str) -> str:
             root=Path("artifacts", weights_path.replace("/", "_").replace(":", "_"))
         )
         return str(next(Path(artifact_path).glob("*.pt")))
-        
+
     except Exception as e:
         LOGGER.error(f"Failed to download from W&B run: {e}")
+        raise e
 
 
 def transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
