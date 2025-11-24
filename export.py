@@ -60,8 +60,6 @@ import pandas as pd
 import torch
 from torch.utils.mobile_optimizer import optimize_for_mobile
 
-from utils.torch_utils import get_resize_info
-
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -87,7 +85,7 @@ from utils.general import (
     url2file,
     yaml_save,
 )
-from utils.torch_utils import select_device, smart_inference_mode
+from utils.torch_utils import get_resize_info, select_device, smart_inference_mode
 
 MACOS = platform.system() == "Darwin"  # macOS environment
 
