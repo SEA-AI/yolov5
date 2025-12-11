@@ -39,7 +39,12 @@ class Albumentations:
                 A.MotionBlur(blur_limit=(12, 30), angle_range=(0, 0), direction_range=(-1.0, 1.0), p=hyp.get("motion_blur", 0.0) if hyp else 0.0),
                 A.ToGray(p=0.01),
                 A.CLAHE(p=0.01),
-                A.RandomBrightnessContrast(p=0.0),
+                A.RandomBrightnessContrast(
+                    brightness_limit=(-0.6, -0.3),   
+                    contrast_limit=(0.3, 0.6),
+                    brightness_by_max=True,   # Essential for thermal data
+                    p=0.8                     # High probability due to thermal variation
+                ),
                 A.RandomGamma(p=0.0),
                 A.ImageCompression(p=hyp.get("compression", 0.0) if hyp else 0.0, quality_lower=50),
             ]  # transforms
