@@ -1,7 +1,8 @@
 """Custom augmentations following the Albumentations API."""
 
 import random
-from typing import Dict, List, Optional, Tuple, Union, cast, Any
+from typing import Dict, List, Optional, Tuple, Union, cast, Any, Literal
+from typing_extensions import Self
 
 import cv2
 import numpy as np
@@ -9,9 +10,10 @@ import albumentations as A
 from albumentations.augmentations.geometric import functional as F
 from albumentations.core.pydantic import InterpolationType
 from albumentations.core.types import ScaleIntType
+from albumentations.core.utils import to_tuple
 from albumentations.augmentations.crops import functional as fcrops
 from albumentations.core.transforms_interface import BaseTransformInitSchema, DualTransform
-from pydantic import ValidationInfo, field_validator
+from pydantic import ValidationInfo, field_validator, model_validator
 
 
 class SafeRandomCrop(A.RandomCrop):
@@ -51,6 +53,136 @@ class SafeRandomCrop(A.RandomCrop):
         w_start = random.random()
         crop_coords = fcrops.get_crop_coords(image_shape, (height, width), h_start, w_start)
         return {"crop_coords": crop_coords}
+
+
+class ThermalMotionBlur(A.ImageOnlyTransform):
+    """Simulate thermal motion blur by convolving a grayscale image with an exponential decay kernel.
+
+    This transform applies a 1D exponential blur kernel along the horizontal direction (central row),
+    parameterized by a "time constant" tau. The kernel simulates blur either to the left, right, or
+    in a random direction. After blurring, random Gaussian noise is optionally added to simulate sensor noise.
+
+    Only grayscale images will be blurred; color images are returned unchanged.
+
+    Args:
+        tau_range (float or tuple[float, float]): Range for the exponential decay parameter (tau).
+            Controls the width/extent of the blur. If a tuple, tau is randomly sampled per call.
+            Must be >= 1. Default: (1, 20).
+        direction (Literal["left", "right", "random"]): Direction of blur. "left" blurs rightward,
+            "right" blurs leftward, "random" picks direction randomly per call. Default: "random".
+        noise_std_range (float or tuple[float, float]): Standard deviation of Gaussian noise to add,
+            as a fraction of max pixel value. If a tuple, noise std is randomly sampled per call.
+            Should be >= 0. Default: (0.01, 0.02).
+        p (float): Probability of applying the transform. Default: 0.5.
+        always_apply (bool, optional): If True, always apply the transform. Default: None.
+
+    Notes:
+        - Blur is applied only to grayscale images (2D or RGB with near-equal channels).
+        - Kernel is non-symmetric and highly directional; not a standard motion blur or box filter.
+        - Gaussian noise is applied after convolution, pixelwise and independently.
+        - Underlying convolution uses OpenCV's filter2D via Albumentations.
+        - Useful for simulating "thermal" or exponential-trail blur typically seen in certain sensing scenarios.
+
+    Targets:
+        image
+
+    Image types:
+        uint8, float32
+
+    Example:
+        >>> import numpy as np
+        >>> import albumentations as A
+        >>> from utils.albumextensions import ThermalMotionBlur
+        >>> image = np.random.randint(0, 256, (100, 100), dtype=np.uint8)
+        >>> transform = ThermalMotionBlur(tau_range=(2, 10), direction="random", p=1.0)
+        >>> result = transform(image=image)
+        >>> motion_blurred_image = result["image"]
+    """
+
+    class InitSchema(BaseTransformInitSchema):
+        tau_range: Union[float, Tuple[float, float]]
+        direction: Literal["left", "right", "random"]
+        noise_std_range: Union[float, Tuple[float, float]]
+
+        @model_validator(mode="after")
+        def process_blur(self) -> Self:
+            self.tau_range = to_tuple(self.tau_range, 1)
+            self.noise_std_range = to_tuple(self.noise_std_range, 0)
+
+            if self.tau_range[0] < 1:
+                raise ValueError("tau_range must be greater than or equal to 1")
+
+            if self.direction not in {"left", "right", "random"}:
+                raise ValueError("direction must be left, right or random")
+
+            if self.noise_std_range[0] < 0:
+                raise ValueError("noise_std_range must be greater than or equal to 0")
+
+            return self
+
+    def __init__(
+        self,
+        tau_range: Union[float, Tuple[float, float]] = (1, 20),
+        direction: Literal["left", "right", "random"] = "random",
+        noise_std_range: Union[float, Tuple[float, float]] = (0.01, 0.02),
+        p: float = 0.5,
+        always_apply: bool | None = None,
+    ):
+        super().__init__(p=p, always_apply=always_apply)
+        self.tau_range = cast("Tuple[float, float]", tau_range)
+        self.direction = direction
+        self.noise_std_range = cast("Tuple[float, float]", noise_std_range)
+
+    def _is_grayscale(self, img: np.ndarray, tol: float = 1e-6) -> bool:
+        if img.ndim == 2:
+            return True
+        if img.ndim != 3 or img.shape[2] != 3:
+            return False
+        # Check all channels same (within tol)
+        diff = img.max(axis=2) - img.min(axis=2)
+        return diff.max() <= tol
+
+    def apply(self, img: np.ndarray, kernel: np.ndarray, noise_std: float, **params: Any) -> np.ndarray:
+        # Blur is only applied to grayscale images
+        if not self._is_grayscale(img):
+            return img
+
+        # blur image
+        img = cv2.filter2D(img, -1, kernel).astype(img.dtype)
+
+        # add gaussian noise
+        noise = np.zeros_like(img[..., 0:1], dtype=np.float32)
+        mean_vector = 0 * np.ones(shape=(1,), dtype=np.float32)
+        std_dev_vector = noise_std * np.ones(shape=(1,), dtype=np.float32)
+        cv2.randn(noise, mean_vector, std_dev_vector)
+        noisy = img.astype(np.float32) + noise * np.iinfo(img.dtype).max
+
+        # clip and return
+        return np.clip(noisy, np.iinfo(img.dtype).min, np.iinfo(img.dtype).max).astype(img.dtype)
+
+    def get_params(self) -> dict[str, Any]:
+        # Kernel length is proportional to tau
+        if self.direction == "random":
+            direction = 1 if random.random() < 0.5 else -1
+        else:
+            direction = 1 if self.direction == "left" else -1
+
+        def exp(tau: float, t: np.ndarray) -> np.ndarray:
+            return np.exp(-direction * t / tau)
+
+        tau = random.uniform(self.tau_range[0], self.tau_range[1])
+        length = int(np.ceil(2.5 * tau))
+        length += 1 if length % 2 == 0 else 0  # Ensure odd
+
+        kernel = np.zeros((length, length))
+        kernel[length // 2, :] = exp(tau, np.arange(length))
+        kernel /= kernel.sum()
+
+        noise_std = random.uniform(self.noise_std_range[0], self.noise_std_range[1])
+        return {"kernel": kernel, "noise_std": noise_std}
+
+    def get_transform_init_args_names(self) -> tuple[str, ...]:
+        return ("tau_range", "direction", "noise_std_range")
 
 
 class MaxSizeHWInitSchema(BaseTransformInitSchema):
