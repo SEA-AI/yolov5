@@ -41,6 +41,9 @@ class Albumentations:
                 A.RandomBrightnessContrast(p=0.0),
                 A.RandomGamma(p=0.0),
                 A.ImageCompression(p=hyp.get("compression", 0.0) if hyp else 0.0, quality_lower=50),
+                Ax.ThermalMotionBlur(
+                    p=hyp.get("ir_blur", 0.0) if hyp else 0.0, tau_range=(1, 10), noise_std_range=(0.005, 0.015)
+                ),
             ]  # transforms
             self.transform = A.Compose(T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]))
 
