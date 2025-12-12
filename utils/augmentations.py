@@ -37,7 +37,7 @@ class Albumentations:
                 A.Blur(blur_limit=3, p=0.3),
                 A.MedianBlur(p=0.01),
                 A.GaussNoise(std_range=[0.1, 0.2], p=0.5),
-                A.MotionBlur(blur_limit=(12, 30), angle_range=(0, 0), direction_range=(-1.0, 1.0), p=hyp.get("motion_blur", 0.0) if hyp else 0.0),
+                A.MotionBlur(blur_limit=(13, 29), angle_range=(0, 0), direction_range=(-1.0, 1.0), p=hyp.get("motion_blur", 0.0) if hyp else 0.0),
                 A.ToGray(p=0.01),
                 A.CLAHE(clip_limit=4.0, tile_grid_size=(8, 8), p=0.5),
                 A.RandomBrightnessContrast(
