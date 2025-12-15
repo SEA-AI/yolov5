@@ -72,8 +72,8 @@ class PreAlbumentations(Albumentations):
             check_version(A.__version__, "1.0.3", hard=True)  # version requirement
             T = [
                 Ax.SafeRandomCrop(p=hyp.get("pre_crop", 0.0) if hyp else 0.0, height=size, width=size),
-                Ax.ThermalMotionBlur(
-                    p=hyp.get("ir_blur", 0.0) if hyp else 0.0, tau_range=(1, 10), noise_std_range=(0.005, 0.015)
+                Ax.ThermalHorizontalMotionBlur(
+                    p=hyp.get("ir_blur", 0.0) if hyp else 0.0, tau_range=(4, 12), noise_std_range=(0.01, 0.02)
                 ),
             ]  # transforms
             self.transform = A.Compose(
