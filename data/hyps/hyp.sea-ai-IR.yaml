@@ -33,7 +33,7 @@ mosaic: 1.0  # image mosaic (probability)
 mixup: 0.0  # image mixup (probability)
 copy_paste: 0.0  # segment copy-paste (probability)
 compression: 0.9  # image compression (probability)
-motion_blur: 0.1  # image motion blur (probability)
+motion_blur: 0.4  # image motion blur (probability)
 
 # pre-augmentations (before main augmentations)
 pre_crop: 0.8  # random crop (probability)
