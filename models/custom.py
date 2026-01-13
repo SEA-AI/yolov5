@@ -1018,12 +1018,19 @@ class OneberryYolo(nn.Module):
         
         Returns combined detections with secondary model taking precedence over overlapping detections.
         """
+        LOGGER.info(f"OneberryYolo forward: input shape {x.shape}")
+        
         # Get predictions from both models
         medium_preds = self.medium_model(x, profile, visualize)
         secondary_preds = self.secondary_model(x, profile, visualize)
         
+        LOGGER.info(f"Medium model predictions shape: {medium_preds[0].shape if isinstance(medium_preds, tuple) else medium_preds.shape}")
+        LOGGER.info(f"Secondary model predictions shape: {secondary_preds[0].shape if isinstance(secondary_preds, tuple) else secondary_preds.shape}")
+        
         # Combine predictions with secondary taking precedence over overlaps
         combined_preds = self._combine_predictions(medium_preds, secondary_preds)
+        
+        LOGGER.info(f"Combined predictions shape: {combined_preds[0].shape if isinstance(combined_preds, tuple) else combined_preds.shape}")
         
         return combined_preds
 
@@ -1075,41 +1082,60 @@ class OneberryYolo(nn.Module):
         batch_size = medium_dets.shape[0]
         combined_detections = []
         
+        LOGGER.info(f"Processing {batch_size} batches, medium_dets shape: {medium_dets.shape}, secondary_dets shape: {secondary_dets.shape}")
+        
         for batch_idx in range(batch_size):
-            medium_batch = medium_dets[batch_idx]  # Shape: [num_dets, 6] (x1,y1,x2,y2,conf,cls)
+            medium_batch = medium_dets[batch_idx]
             secondary_batch = secondary_dets[batch_idx]
+            
+            LOGGER.info(f"Batch {batch_idx}: medium_batch shape: {medium_batch.shape}, secondary_batch shape: {secondary_batch.shape}")
             
             # Filter out predictions with confidence = 0 (empty slots)
             medium_valid = medium_batch[medium_batch[:, 4] > 0]  # conf > 0
             secondary_valid = secondary_batch[secondary_batch[:, 4] > 0]  # conf > 0
             
+            LOGGER.info(f"Batch {batch_idx}: medium_valid: {len(medium_valid)}, secondary_valid: {len(secondary_valid)}")
+            if len(medium_valid) > 0:
+                LOGGER.info(f"Medium valid confidences: {medium_valid[:5, 4]}")  # Show first 5 confidence scores
+            if len(secondary_valid) > 0:
+                LOGGER.info(f"Secondary valid confidences: {secondary_valid[:5, 4]}")  # Show first 5 confidence scores
+            
             if len(secondary_valid) == 0 and len(medium_valid) == 0:
                 # No valid detections from either model
+                LOGGER.info(f"Batch {batch_idx}: No valid detections from either model")
                 combined_detections.append(medium_batch)  # Keep original shape
                 continue
             elif len(secondary_valid) == 0:
                 # Only medium detections
+                LOGGER.info(f"Batch {batch_idx}: Only medium detections ({len(medium_valid)})")
                 combined_detections.append(medium_batch)
                 continue
             elif len(medium_valid) == 0:
                 # Only secondary detections, pad to match original shape
+                LOGGER.info(f"Batch {batch_idx}: Only secondary detections ({len(secondary_valid)})")
                 padded_secondary = torch.zeros_like(medium_batch)
                 padded_secondary[:len(secondary_valid)] = secondary_valid
                 combined_detections.append(padded_secondary)
                 continue
             
             # Remove medium detections that overlap with secondary detections
+            LOGGER.info(f"Batch {batch_idx}: Filtering overlaps, IoU threshold: {self.iou_threshold}")
             non_overlapping_medium = self._filter_overlapping_detections(
                 medium_valid, secondary_valid, self.iou_threshold
             )
             
+            LOGGER.info(f"Batch {batch_idx}: After overlap filtering: {len(non_overlapping_medium)} medium detections remain")
+            
             # Combine secondary (priority) + non-overlapping medium
             all_dets = torch.cat([secondary_valid, non_overlapping_medium], dim=0)
+            LOGGER.info(f"Batch {batch_idx}: Combined detections: {len(all_dets)} total")
             
             # Pad to match original tensor shape if needed
             combined_batch = torch.zeros_like(medium_batch)
             num_dets = min(len(all_dets), combined_batch.shape[0])
             combined_batch[:num_dets] = all_dets[:num_dets]
+            
+            LOGGER.info(f"Batch {batch_idx}: Final combined_batch non-zero entries: {(combined_batch[:, 4] > 0).sum()}")
             
             combined_detections.append(combined_batch)
         
@@ -1134,26 +1160,35 @@ class OneberryYolo(nn.Module):
             Non-overlapping medium detections
         """
         if len(medium_dets) == 0 or len(secondary_dets) == 0:
+            LOGGER.info(f"Early return: medium_dets: {len(medium_dets)}, secondary_dets: {len(secondary_dets)}")
             return medium_dets
         
         # Limit the number of detections to prevent memory issues during ONNX export
         max_dets = 100  # Reasonable limit for real-world scenarios
         medium_dets_limited = medium_dets[:max_dets] if len(medium_dets) > max_dets else medium_dets
         secondary_dets_limited = secondary_dets[:max_dets] if len(secondary_dets) > max_dets else secondary_dets
+        
+        LOGGER.info(f"Overlap filtering: medium {len(medium_dets)} -> {len(medium_dets_limited)}, secondary {len(secondary_dets)} -> {len(secondary_dets_limited)}")
             
         # Calculate IoU between limited sets of detections
         ious = self._calculate_iou_matrix(medium_dets_limited[:, :4], secondary_dets_limited[:, :4])
+        LOGGER.info(f"IoU matrix shape: {ious.shape}, max IoU: {ious.max():.3f}")
         
         # Find medium detections that don't overlap significantly with any secondary detection
         max_ious_per_medium = ious.max(dim=1)[0]  # Max IoU for each medium detection
         non_overlapping_mask = max_ious_per_medium < iou_threshold
         
+        LOGGER.info(f"Non-overlapping detections: {non_overlapping_mask.sum()}/{len(medium_dets_limited)}")
+        
         # Apply mask to original (potentially larger) set of medium detections
         if len(medium_dets) > max_dets:
             # If we had to limit, be conservative and only return the processed subset
-            return medium_dets_limited[non_overlapping_mask]
+            result = medium_dets_limited[non_overlapping_mask]
         else:
-            return medium_dets[non_overlapping_mask]
+            result = medium_dets[non_overlapping_mask]
+            
+        LOGGER.info(f"Returning {len(result)} non-overlapping medium detections")
+        return result
 
     def _calculate_iou_matrix(self, boxes1, boxes2):
         """Calculate IoU matrix between two sets of boxes - memory optimized.
