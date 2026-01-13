@@ -8,7 +8,11 @@ https://onnx.ai/
 The exported ONNX model can be used with various inference engines and accelerators,
 including TensorRT for optimized GPU inference.
 
-Example:
+This script supports two modes:
+1. SeaYOLO - Single model export (default behavior)
+2. OneberryYolo - Dual model export with overlap handling
+
+Example (SeaYOLO - single model):
     # Using local weights files:
     python export/yolo.py \
         --det_weights yolov5n.pt \
@@ -28,6 +32,18 @@ Example:
         --half \
         --fname yolo.onnx
 
+Example (OneberryYolo - dual model with overlap handling):
+    # Combine medium and secondary models where secondary takes precedence over overlaps:
+    python export/yolo.py \
+        --det_weights yolov5m.pt \
+        --secondary_weights yolov5n.pt \
+        --imgsz 640 \
+        --batch-size 2 \
+        --iou-threshold 0.5 \
+        --fuse \
+        --half \
+        --fname oneberry_yolo.onnx
+
 NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 """
 
@@ -42,7 +58,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 
 from utils.export import export_model_to_onnx, get_weights_path, transform_sz
-from models.custom import SeaYOLO
+from models.custom import SeaYOLO, OneberryYolo
 
 def main(
     det_weights: str,
@@ -55,6 +71,8 @@ def main(
     simplify: bool = False,
     trt7_compatible: bool = False,
     fname: str = "",
+    secondary_weights: str = "",  # For OneberryYolo
+    iou_threshold: float = 0.5,  # For OneberryYolo overlap detection
 ):
     """Export the YOLO model to ONNX format."""
     # Transform image size to (height, width) format
@@ -62,13 +80,28 @@ def main(
     infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
     det_weights = get_weights_path(det_weights)
 
-    model = SeaYOLO(
-        obj_det_weights=det_weights,
-        fp16=half,
-        fuse=fuse,
-        imgsz=imgsz,
-        infsz=infsz,
-    )
+    # Choose model based on whether secondary_weights is provided
+    if secondary_weights:
+        # Use OneberryYolo for dual-model export
+        secondary_weights = get_weights_path(secondary_weights)
+        model = OneberryYolo(
+            medium_weights=det_weights,
+            secondary_weights=secondary_weights,
+            fp16=half,
+            fuse=fuse,
+            imgsz=imgsz,
+            infsz=infsz,
+            iou_threshold=iou_threshold,
+        )
+    else:
+        # Use SeaYOLO for single-model export
+        model = SeaYOLO(
+            obj_det_weights=det_weights,
+            fp16=half,
+            fuse=fuse,
+            imgsz=imgsz,
+            infsz=infsz,
+        )
 
     export_model_to_onnx(
         model=model,
@@ -88,7 +121,20 @@ def _parse_args():
         "--det-weights",
         type=str,
         required=True,
-        help="Path to the object detection model weights or W&B artifact (e.g., 'YOLOv5n-IR:latest').",
+        help="Path to the object detection model weights or W&B artifact (e.g., 'YOLOv5n-IR:latest'). For OneberryYolo, this will be used as the medium model.",
+    )
+    parser.add_argument(
+        "-sw",
+        "--secondary-weights",
+        type=str,
+        default="",
+        help="Path to the secondary model weights for OneberryYolo. If provided, OneberryYolo will be used instead of SeaYOLO. The secondary model has priority over overlapping predictions.",
+    )
+    parser.add_argument(
+        "--iou-threshold",
+        type=float,
+        default=0.5,
+        help="IoU threshold for overlapping detection handling in OneberryYolo (0.0-1.0).",
     )
     parser.add_argument("-sz", "--imgsz", nargs="+", type=int, default=[640, 640], help="image input shape (h, w)")
     parser.add_argument(
