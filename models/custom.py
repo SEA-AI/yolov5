@@ -986,6 +986,13 @@ class OneberryYolo(nn.Module):
         self.stride = self.medium_model.stride
         self.names = self.medium_model.names
         
+        # Store class mappings for proper alignment
+        self.medium_names = self.medium_model.names
+        self.secondary_names = self.secondary_model.names
+        
+        LOGGER.info(f"Medium model classes: {self.medium_names}")
+        LOGGER.info(f"Secondary model classes: {self.secondary_names}")
+        
         # Store image sizes
         self.imgsz = imgsz
         self.infsz = infsz if infsz is not None else imgsz
@@ -1028,6 +1035,42 @@ class OneberryYolo(nn.Module):
         # YOLOv5 returns a tuple with detection tensor at index 0
         medium_dets = medium_preds[0] if isinstance(medium_preds, tuple) else medium_preds
         secondary_dets = secondary_preds[0] if isinstance(secondary_preds, tuple) else secondary_preds
+        
+        # Handle tensor compatibility - append secondary classes at the end
+        # Format: [x1, y1, x2, y2, confidence, medium_class1, medium_class2, ..., secondary_class1, secondary_class2, ...]
+        medium_cols = medium_dets.shape[-1]
+        secondary_cols = secondary_dets.shape[-1]
+        
+        # Calculate expected columns dynamically
+        medium_classes = len(self.medium_names)
+        secondary_classes = len(self.secondary_names)
+        bbox_conf_cols = medium_cols - medium_classes  # bbox + confidence columns
+        total_cols = bbox_conf_cols + medium_classes + secondary_classes
+        
+        # Pad medium model to make room for secondary classes at the end
+        if medium_cols < total_cols:
+            pad_size = total_cols - medium_cols  # Add space for secondary classes
+            padding = torch.zeros(*medium_dets.shape[:-1], pad_size, 
+                                device=medium_dets.device, dtype=medium_dets.dtype)
+            medium_dets = torch.cat([medium_dets, padding], dim=-1)
+            LOGGER.info(f"Padded medium model from {medium_cols} to {total_cols} columns (added space for secondary classes)")
+        
+        # Realign secondary model predictions - put secondary classes at the end
+        if secondary_cols != total_cols:
+            # Create aligned tensor for secondary model
+            aligned_secondary = torch.zeros(*secondary_dets.shape[:-1], total_cols, 
+                                          device=secondary_dets.device, dtype=secondary_dets.dtype)
+            
+            # Copy bbox and confidence columns
+            aligned_secondary[..., :bbox_conf_cols] = secondary_dets[..., :bbox_conf_cols]
+            
+            # Place secondary classes at the end (after medium classes)
+            start_idx = bbox_conf_cols + medium_classes
+            end_idx = start_idx + secondary_classes
+            aligned_secondary[..., start_idx:end_idx] = secondary_dets[..., bbox_conf_cols:bbox_conf_cols+secondary_classes]
+                    
+            secondary_dets = aligned_secondary
+            LOGGER.info(f"Placed secondary model classes at the end (columns {start_idx}-{end_idx-1})")
         
         batch_size = medium_dets.shape[0]
         combined_detections = []
