@@ -1126,8 +1126,8 @@ class OneberryYolo(nn.Module):
         """Filter out medium detections that overlap with secondary detections.
         
         Args:
-            medium_dets: Medium model detections [N, 6]
-            secondary_dets: Secondary model detections [M, 6] (takes priority)
+            medium_dets: Medium model detections [N, 6+]
+            secondary_dets: Secondary model detections [M, 6+] (takes priority)
             iou_threshold: IoU threshold for overlap detection
             
         Returns:
@@ -1135,18 +1135,28 @@ class OneberryYolo(nn.Module):
         """
         if len(medium_dets) == 0 or len(secondary_dets) == 0:
             return medium_dets
+        
+        # Limit the number of detections to prevent memory issues during ONNX export
+        max_dets = 100  # Reasonable limit for real-world scenarios
+        medium_dets_limited = medium_dets[:max_dets] if len(medium_dets) > max_dets else medium_dets
+        secondary_dets_limited = secondary_dets[:max_dets] if len(secondary_dets) > max_dets else secondary_dets
             
-        # Calculate IoU between all medium and secondary detections
-        ious = self._calculate_iou_matrix(medium_dets[:, :4], secondary_dets[:, :4])
+        # Calculate IoU between limited sets of detections
+        ious = self._calculate_iou_matrix(medium_dets_limited[:, :4], secondary_dets_limited[:, :4])
         
         # Find medium detections that don't overlap significantly with any secondary detection
         max_ious_per_medium = ious.max(dim=1)[0]  # Max IoU for each medium detection
         non_overlapping_mask = max_ious_per_medium < iou_threshold
         
-        return medium_dets[non_overlapping_mask]
+        # Apply mask to original (potentially larger) set of medium detections
+        if len(medium_dets) > max_dets:
+            # If we had to limit, be conservative and only return the processed subset
+            return medium_dets_limited[non_overlapping_mask]
+        else:
+            return medium_dets[non_overlapping_mask]
 
     def _calculate_iou_matrix(self, boxes1, boxes2):
-        """Calculate IoU matrix between two sets of boxes.
+        """Calculate IoU matrix between two sets of boxes - memory optimized.
         
         Args:
             boxes1: [N, 4] tensor of boxes (x1, y1, x2, y2)
@@ -1155,28 +1165,29 @@ class OneberryYolo(nn.Module):
         Returns:
             [N, M] tensor of IoU values
         """
-        # Expand dims for broadcasting
-        boxes1 = boxes1.unsqueeze(1)  # [N, 1, 4]
-        boxes2 = boxes2.unsqueeze(0)  # [1, M, 4]
+        # Use efficient broadcasting without creating large intermediate tensors
+        N, M = boxes1.shape[0], boxes2.shape[0]
         
-        # Calculate intersection coordinates
-        inter_x1 = torch.max(boxes1[:, :, 0], boxes2[:, :, 0])
-        inter_y1 = torch.max(boxes1[:, :, 1], boxes2[:, :, 1])
-        inter_x2 = torch.min(boxes1[:, :, 2], boxes2[:, :, 2])
-        inter_y2 = torch.min(boxes1[:, :, 3], boxes2[:, :, 3])
+        # Calculate areas once
+        area1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])  # [N]
+        area2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])  # [M]
+        
+        # Reshape for broadcasting: [N, 1] and [1, M]
+        area1 = area1.unsqueeze(1)  # [N, 1]
+        area2 = area2.unsqueeze(0)  # [1, M]
+        
+        # Calculate intersection more efficiently
+        x1 = torch.max(boxes1[:, 0:1], boxes2[:, 0:1].t())  # [N, M]
+        y1 = torch.max(boxes1[:, 1:2], boxes2[:, 1:2].t())  # [N, M]
+        x2 = torch.min(boxes1[:, 2:3], boxes2[:, 2:3].t())  # [N, M]
+        y2 = torch.min(boxes1[:, 3:4], boxes2[:, 3:4].t())  # [N, M]
         
         # Calculate intersection area
-        inter_area = torch.clamp(inter_x2 - inter_x1, min=0) * torch.clamp(inter_y2 - inter_y1, min=0)
+        inter_area = torch.clamp(x2 - x1, min=0) * torch.clamp(y2 - y1, min=0)
         
-        # Calculate areas of both sets of boxes
-        area1 = (boxes1[:, :, 2] - boxes1[:, :, 0]) * (boxes1[:, :, 3] - boxes1[:, :, 1])
-        area2 = (boxes2[:, :, 2] - boxes2[:, :, 0]) * (boxes2[:, :, 3] - boxes2[:, :, 1])
-        
-        # Calculate union area
+        # Calculate union area and IoU
         union_area = area1 + area2 - inter_area
-        
-        # Calculate IoU
-        iou = inter_area / (union_area + 1e-6)  # Add small epsilon to avoid division by zero
+        iou = inter_area / (union_area + 1e-6)
         
         return iou
 
