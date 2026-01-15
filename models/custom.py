@@ -940,7 +940,7 @@ def _get_classification_heads(model, cutoff, nc_pitch, nc_theta):
     return c_pitch, c_theta
 
 
-class OneberryYolo(nn.Module):
+class OneberryYolo(SeaYOLO):
     """Custom YOLO model that combines two YOLOv5 models (primary and secondary).
     
     Predictions from both models are combined with proper class alignment.
@@ -970,21 +970,21 @@ class OneberryYolo(nn.Module):
             infsz: Inference size (height, width). If different from imgsz,
                    the model will apply resize/padding transformations
         """
-        super().__init__()
+        # Initialize parent SeaYOLO with primary model
+        super().__init__(
+            obj_det_weights=primary_weights,
+            device=device,
+            fp16=fp16,
+            fuse=fuse,
+            imgsz=imgsz,
+            infsz=infsz,
+        )
         
-        # Load both models
-        self.primary_model = ObjectsModel(primary_weights, device=device, fp16=fp16, fuse=fuse)
+        # Load secondary model
         self.secondary_model = ObjectsModel(secondary_weights, device=device, fp16=fp16, fuse=fuse)
         
-        # Set device and precision properties
-        self.device = self.primary_model.device
-        self.fp16 = fp16
-        
-        # Use primary model's stride
-        self.stride = self.primary_model.stride
-        
         # Store class mappings for proper alignment
-        self.primary_names = self.primary_model.names
+        self.primary_names = self.obj_det.names
         self.secondary_names = self.secondary_model.names
         
         # Create merged class names and mapping
@@ -995,19 +995,9 @@ class OneberryYolo(nn.Module):
         LOGGER.info(f"Merged classes: {self.names}")
         LOGGER.info(f"Secondary class mapping: {self.secondary_to_merged_map}")
         
-        # Store image sizes
-        self.imgsz = imgsz
-        self.infsz = infsz if infsz is not None else imgsz
-        
-        # Scaling and Padding Preprocessing (reuse SeaYOLO logic)
-        self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
-        
-        # keep track of hooks
-        self.hooks = {}
-        
         LOGGER.info(
             f"OneberryYolo model info: "
-            f"primary_stride={self.primary_model.stride}, "
+            f"primary_stride={self.obj_det.stride}, "
             f"secondary_stride={self.secondary_model.stride}, "
             f"combined_stride={self.stride}"
         )
@@ -1051,7 +1041,7 @@ class OneberryYolo(nn.Module):
         """
         
         # Get predictions from both models
-        primary_preds = self.primary_model(x, profile, visualize)
+        primary_preds = self.obj_det(x, profile, visualize)
         secondary_preds = self.secondary_model(x, profile, visualize)
         
         # Combine predictions
@@ -1105,125 +1095,9 @@ class OneberryYolo(nn.Module):
         
         return (output,)
 
-    def register_preprocessing_hook(self):
-        """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
-        if "preprocessing" in self.hooks:
-            return
-        self.hooks["preprocessing"] = self.register_forward_pre_hook(self._preprocessing_hook)
-
-    def register_postprocessing_hook(self):
-        """Register hooks to convert half to float precision after forward pass."""
-        if "postprocessing" in self.hooks:
-            return
-        self.hooks["postprocessing"] = self.register_forward_hook(self._postprocessing_hook)
-
-    def register_io_hooks(self):
-        """Register hooks for input and output processing."""
-        self.register_preprocessing_hook()
-        self.register_postprocessing_hook()
-
-    def remove_hooks(self):
-        """Remove hooks."""
-        for _, hook in self.hooks.items():
-            hook.remove()
-        self.hooks.clear()
-
-    @staticmethod
-    def get_transform(imgsz: Tuple[int, int], infsz: Optional[Tuple[int, int]] = None):
-        """Get the transformation to be applied to the image. Reuse SeaYOLO logic."""
-        if imgsz == infsz or infsz is None:
-            return None, None
-
-        pad_left, pad_right, pad_top, pad_bottom = OneberryYolo.get_padding_for_aspect_ratio(imgsz, infsz)
-        ratio = max(imgsz[0] / infsz[0], imgsz[1] / infsz[1])
-        ratio_pad = [[1 / ratio], [pad_left, pad_top]]  # [[gain], [pad_x, pad_y]] for scale_boxes
-        transform = transforms.Compose([])
-        if ratio != 1:
-            transform.transforms.extend(
-                [
-                    transforms.Resize(
-                        (
-                            infsz[0] - pad_top - pad_bottom,
-                            infsz[1] - pad_left - pad_right,
-                        ),
-                        interpolation=transforms.InterpolationMode.BILINEAR,
-                        antialias=False,
-                    )
-                ]
-            )
-        if pad_left != 0 or pad_right != 0 or pad_top != 0 or pad_bottom != 0:
-            transform.transforms.extend(
-                [
-                    transforms.Pad(
-                        padding=(pad_left, pad_top, pad_right, pad_bottom),
-                        fill=0,
-                        padding_mode="constant",
-                    )
-                ]
-            )
-        return transform, ratio_pad
-
-    @staticmethod
-    def get_padding_for_aspect_ratio(imgsz, infsz):
-        """Calculate padding for aspect ratio preservation. Reuse SeaYOLO logic."""
-        h_in, w_in = imgsz
-        h_out, w_out = infsz
-
-        scale = min(h_out / h_in, w_out / w_in)
-        new_h = int(h_in * scale)
-        new_w = int(w_in * scale)
-
-        pad_h = h_out - new_h
-        pad_w = w_out - new_w
-
-        pad_top = pad_h // 2
-        pad_bottom = pad_h - pad_top
-        pad_left = pad_w // 2
-        pad_right = pad_w - pad_left
-
-        return pad_left, pad_right, pad_top, pad_bottom
-
-    @staticmethod
-    def _preprocessing_hook(module, inputs):
-        """Add preprocessing operations to be part of the model."""
-
-        def _preprocess(x: torch.Tensor):
-            if len(x.shape) < 1:
-                return x
-            if module.transform is not None:
-                x = x.float()
-                x = module.transform(x)
-            x = x.half() if module.fp16 else x.float()
-            x = x / 255  # 0-255 to 0.0-1.0
-            return x
-
-        return tuple(_preprocess(inp) for inp in inputs)
-
-    @staticmethod
-    def _postprocessing_hook(module, inputs, outputs):
-        """Convert outputs to float (if needed) and scale back boxes if transform was applied."""
-
-        def _to_float(x):
-            return x.float() if module.fp16 else x
-
-        # outputs is the detection tuple from forward method
-        detections = outputs
-
-        # Scale back boxes if transform was applied
-        if module.ratio_pad is not None:
-            detections = (
-                scale_boxes(module.infsz, detections[0], module.imgsz, ratio_pad=module.ratio_pad),
-            ) + detections[1:]
-
-        # Convert first item (detection outputs) to float if needed
-        detections = (_to_float(detections[0]),) + detections[1:]
-        
-        print(detections[0].shape)
-
-        return detections
-
     def prepare_for_export(self, dynamic: bool = False):
         """Prepare both models for export."""
         LOGGER.info(f"✨ Preparing {self.__class__.__name__} for export...")
-        self.primary_model.prepare_for_export(dynamic)
+        self.obj_det.prepare_for_export(dynamic)
         self.secondary_model.prepare_for_export(dynamic)
+

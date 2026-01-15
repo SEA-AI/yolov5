@@ -123,7 +123,7 @@ def export_model_to_onnx(
     model.register_io_hooks()  # inp: uint8 -> fp32/fp16 / 255.0, out: fp16 -> fp32
 
     # Create dummy input
-    image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).float() / 255.0  # B, C, H, W
+    image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte()  # B, C, H, W
     # https://github.com/NVIDIA/TensorRT/issues/3026#issuecomment-1570419758
     image = image.float() if trt7_compatible else image
     LOGGER.info(f"🔮 Dummy input...{image.shape}, {image.dtype}")
