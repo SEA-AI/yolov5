@@ -503,7 +503,7 @@ class SeaYOLO(nn.Module):
                 x = x.float()
                 x = module.transform(x)
             x = x.half() if module.fp16 else x.float()
-            x = x  # 0-255 to 0.0-1.0
+            x = x / 255  # 0-255 to 0.0-1.0
             return x
 
         return tuple(_preprocess(inp) for inp in inputs)
@@ -1194,7 +1194,7 @@ class OneberryYolo(nn.Module):
                 x = x.float()
                 x = module.transform(x)
             x = x.half() if module.fp16 else x.float()
-            x = x  # 0-255 to 0.0-1.0
+            x = x / 255  # 0-255 to 0.0-1.0
             return x
 
         return tuple(_preprocess(inp) for inp in inputs)
