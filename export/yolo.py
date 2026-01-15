@@ -10,7 +10,7 @@ including TensorRT for optimized GPU inference.
 
 This script supports two modes:
 1. SeaYOLO - Single model export (default behavior)
-2. OneberryYolo - Dual model export with overlap handling
+2. OneberryYolo - Dual model export with class alignment
 
 Example (SeaYOLO - single model):
     # Using local weights files:
@@ -32,14 +32,13 @@ Example (SeaYOLO - single model):
         --half \
         --fname yolo.onnx
 
-Example (OneberryYolo - dual model with overlap handling):
-    # Combine primary and secondary models where secondary takes precedence over overlaps:
+Example (OneberryYolo - dual model with class alignment):
+    # Combine primary and secondary models with proper class alignment:
     python export/yolo.py \
         --det_weights yolov5m.pt \
         --secondary_weights yolov5n.pt \
         --imgsz 640 \
         --batch-size 2 \
-        --iou-threshold 0.5 \
         --fuse \
         --half \
         --fname oneberry_yolo.onnx
@@ -74,7 +73,6 @@ def main(
     trt7_compatible: bool = False,
     fname: str = "",
     secondary_weights: str = "",  # For OneberryYolo
-    iou_threshold: float = 0.5,  # For OneberryYolo overlap detection
 ):
     """Export the YOLO model to ONNX format."""
     # Transform image size to (height, width) format
@@ -93,7 +91,6 @@ def main(
             fuse=fuse,
             imgsz=imgsz,
             infsz=infsz,
-            iou_threshold=iou_threshold,
         )
     else:
         # Use SeaYOLO for single-model export
@@ -146,13 +143,7 @@ def _parse_args():
         "--secondary-weights",
         type=str,
         default="",
-        help="Path to the secondary model weights for OneberryYolo. If provided, OneberryYolo will be used instead of SeaYOLO. The secondary model has priority over overlapping predictions.",
-    )
-    parser.add_argument(
-        "--iou-threshold",
-        type=float,
-        default=0.5,
-        help="IoU threshold for overlapping detection handling in OneberryYolo (0.0-1.0).",
+        help="Path to the secondary model weights for OneberryYolo. If provided, OneberryYolo will be used instead of SeaYOLO.",
     )
     parser.add_argument("-sz", "--imgsz", nargs="+", type=int, default=[640, 640], help="image input shape (h, w)")
     parser.add_argument(
