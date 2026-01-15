@@ -1083,8 +1083,13 @@ class OneberryYolo(nn.Module):
             dtype=primary_dets.dtype
         )
         
-        # Copy primary detections (already aligned with merged classes since primary comes first)
-        output[:, :primary_dets.shape[1], :primary_dets.shape[2]] = primary_dets
+        # Copy primary detections
+        # Bbox and confidence (first 5 columns)
+        output[:, :primary_dets.shape[1], :bbox_conf_cols] = primary_dets[:, :, :bbox_conf_cols]
+        # Class probabilities (primary classes maintain their indices in merged space)
+        num_primary_classes = len(self.primary_names)
+        output[:, :primary_dets.shape[1], bbox_conf_cols:bbox_conf_cols + num_primary_classes] = \
+            primary_dets[:, :, bbox_conf_cols:]
         
         # Remap secondary detections to merged class space
         secondary_start_idx = primary_dets.shape[1]
