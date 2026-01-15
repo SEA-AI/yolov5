@@ -503,7 +503,7 @@ class SeaYOLO(nn.Module):
                 x = x.float()
                 x = module.transform(x)
             x = x.half() if module.fp16 else x.float()
-            x = x / 255.0  # 0-255 to 0.0-1.0
+            x = x  # 0-255 to 0.0-1.0
             return x
 
         return tuple(_preprocess(inp) for inp in inputs)
@@ -941,64 +941,63 @@ def _get_classification_heads(model, cutoff, nc_pitch, nc_theta):
 
 
 class OneberryYolo(nn.Module):
-    """Custom YOLO model that combines two YOLOv5 models (medium and secondary).
+    """Custom YOLO model that combines two YOLOv5 models (primary and secondary).
     
-    When there are overlapping predictions, the secondary model predictions take precedence.
-    This allows for a hybrid approach where the medium model provides broader coverage
-    while the secondary model provides focused, prioritized detections.
+    Predictions from both models are combined with proper class alignment.
+    This allows for a hybrid approach where the primary model provides broader coverage
+    while the secondary model provides focused detections.
     """
 
     def __init__(
         self,
-        medium_weights: str,
+        primary_weights: str,
         secondary_weights: str,
         device: Union[str, torch.device] = None,  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
         imgsz: Tuple[int, int] = (640, 640),
         infsz: Optional[Tuple[int, int]] = None,
-        iou_threshold: float = 0.5,  # IoU threshold for overlap detection
     ):
         """Initialize OneberryYolo model.
         
         Args:
-            medium_weights: Path to medium model weights file
-            secondary_weights: Path to secondary model weights file (has priority over overlapping predictions)
+            primary_weights: Path to primary model weights file
+            secondary_weights: Path to secondary model weights file
             device: Device to run model on (automatically selected if None)
             fp16: Use half precision (fp16)
             fuse: Fuse conv and batch norm layers
             imgsz: Input image size (height, width)
             infsz: Inference size (height, width). If different from imgsz,
                    the model will apply resize/padding transformations
-            iou_threshold: IoU threshold for determining overlapping detections
         """
         super().__init__()
         
         # Load both models
-        self.medium_model = ObjectsModel(medium_weights, device=device, fp16=fp16, fuse=fuse)
+        self.primary_model = ObjectsModel(primary_weights, device=device, fp16=fp16, fuse=fuse)
         self.secondary_model = ObjectsModel(secondary_weights, device=device, fp16=fp16, fuse=fuse)
         
         # Set device and precision properties
-        self.device = self.medium_model.device
+        self.device = self.primary_model.device
         self.fp16 = fp16
         
-        # Use medium model's stride and names as primary (they should be the same)
-        self.stride = self.medium_model.stride
-        self.names = self.medium_model.names
+        # Use primary model's stride
+        self.stride = self.primary_model.stride
         
         # Store class mappings for proper alignment
-        self.medium_names = self.medium_model.names
+        self.primary_names = self.primary_model.names
         self.secondary_names = self.secondary_model.names
         
-        LOGGER.info(f"Medium model classes: {self.medium_names}")
+        # Create merged class names and mapping
+        self._create_class_mapping()
+        
+        LOGGER.info(f"Primary model classes: {self.primary_names}")
         LOGGER.info(f"Secondary model classes: {self.secondary_names}")
+        LOGGER.info(f"Merged classes: {self.names}")
+        LOGGER.info(f"Secondary class mapping: {self.secondary_to_merged_map}")
         
         # Store image sizes
         self.imgsz = imgsz
         self.infsz = infsz if infsz is not None else imgsz
-        
-        # IoU threshold for overlap detection
-        self.iou_threshold = iou_threshold
         
         # Scaling and Padding Preprocessing (reuse SeaYOLO logic)
         self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
@@ -1008,223 +1007,98 @@ class OneberryYolo(nn.Module):
         
         LOGGER.info(
             f"OneberryYolo model info: "
-            f"medium_stride={self.medium_model.stride}, "
+            f"primary_stride={self.primary_model.stride}, "
             f"secondary_stride={self.secondary_model.stride}, "
             f"combined_stride={self.stride}"
         )
 
-    def forward(self, x, profile=False, visualize=False):
-        """Forward pass through both models with overlap handling.
+    def _create_class_mapping(self):
+        """Create merged class names and mapping from secondary to merged indices.
         
-        Returns combined detections with secondary model taking precedence over overlapping detections.
+        Common classes between primary and secondary models will share the same class ID.
+        Unique classes from secondary model will be appended after primary classes.
         """
-        LOGGER.info(f"OneberryYolo forward: input shape {x.shape}")
+        # Start with primary model classes
+        merged_names = dict(self.primary_names)
+        
+        # Create mapping for secondary model: secondary_idx -> merged_idx
+        self.secondary_to_merged_map = {}
+        
+        for sec_idx, sec_name in self.secondary_names.items():
+            # Check if this class exists in primary model
+            found_in_primary = False
+            for prim_idx, prim_name in self.primary_names.items():
+                if sec_name.lower() == prim_name.lower():  # Case-insensitive match
+                    # Map secondary class to existing primary class
+                    self.secondary_to_merged_map[sec_idx] = prim_idx
+                    found_in_primary = True
+                    LOGGER.info(f"Common class found: '{sec_name}' (secondary idx {sec_idx} -> primary idx {prim_idx})")
+                    break
+            
+            if not found_in_primary:
+                # Add unique secondary class to merged list
+                new_idx = len(merged_names)
+                merged_names[new_idx] = sec_name
+                self.secondary_to_merged_map[sec_idx] = new_idx
+        
+        self.names = merged_names
+        self.num_merged_classes = len(merged_names)
+
+    def forward(self, x, profile=False, visualize=False):
+        """Forward pass through both models.
+        
+        Returns combined detections with secondary model.
+        """
         
         # Get predictions from both models
-        medium_preds = self.medium_model(x, profile, visualize)
+        primary_preds = self.primary_model(x, profile, visualize)
         secondary_preds = self.secondary_model(x, profile, visualize)
         
-        LOGGER.info(f"Medium model predictions shape: {medium_preds[0].shape if isinstance(medium_preds, tuple) else medium_preds.shape}")
-        LOGGER.info(f"Secondary model predictions shape: {secondary_preds[0].shape if isinstance(secondary_preds, tuple) else secondary_preds.shape}")
-        
-        # Combine predictions with secondary taking precedence over overlaps
-        combined_preds = self._combine_predictions(medium_preds, secondary_preds)
-        
-        LOGGER.info(f"Combined predictions shape: {combined_preds[0].shape if isinstance(combined_preds, tuple) else combined_preds.shape}")
+        # Combine predictions
+        combined_preds = self._combine_predictions(primary_preds, secondary_preds)
         
         return combined_preds
 
-    def _combine_predictions(self, medium_preds, secondary_preds):
-        """Combine predictions from medium and secondary models.
+    def _combine_predictions(self, primary_preds, secondary_preds):
+        """Combine predictions from primary and secondary models with proper class alignment.
         
-        Secondary model predictions take precedence over overlapping medium model predictions.
+        Common classes are merged to use the same class ID in the output.
         """
         # YOLOv5 returns a tuple with detection tensor at index 0
-        medium_dets = medium_preds[0] if isinstance(medium_preds, tuple) else medium_preds
+        primary_dets = primary_preds[0] if isinstance(primary_preds, tuple) else primary_preds
         secondary_dets = secondary_preds[0] if isinstance(secondary_preds, tuple) else secondary_preds
         
-        # Handle tensor compatibility - append secondary classes at the end
-        # Format: [x1, y1, x2, y2, confidence, medium_class1, medium_class2, ..., secondary_class1, secondary_class2, ...]
-        medium_cols = medium_dets.shape[-1]
-        secondary_cols = secondary_dets.shape[-1]
+        # Calculate expected columns based on class counts
+        merged_classes = self.num_merged_classes
+        bbox_conf_cols = 5  # x1, y1, x2, y2, confidence
         
-        # Calculate expected columns dynamically
-        medium_classes = len(self.medium_names)
-        secondary_classes = len(self.secondary_names)
-        bbox_conf_cols = medium_cols - medium_classes  # bbox + confidence columns
-        total_cols = bbox_conf_cols + medium_classes + secondary_classes
+        batch_size = primary_dets.shape[0]
+        total_dets = primary_dets.shape[1] + secondary_dets.shape[1]
+        total_cols = bbox_conf_cols + merged_classes
         
-        # Pad medium model to make room for secondary classes at the end
-        if medium_cols < total_cols:
-            pad_size = total_cols - medium_cols  # Add space for secondary classes
-            padding = torch.zeros(*medium_dets.shape[:-1], pad_size, 
-                                device=medium_dets.device, dtype=medium_dets.dtype)
-            medium_dets = torch.cat([medium_dets, padding], dim=-1)
-            LOGGER.info(f"Padded medium model from {medium_cols} to {total_cols} columns (added space for secondary classes)")
+        # Create output tensor with merged class space
+        output = torch.zeros(
+            (batch_size, total_dets, total_cols),
+            device=primary_dets.device,
+            dtype=primary_dets.dtype
+        )
         
-        # Realign secondary model predictions - put secondary classes at the end
-        if secondary_cols != total_cols:
-            # Create aligned tensor for secondary model
-            aligned_secondary = torch.zeros(*secondary_dets.shape[:-1], total_cols, 
-                                          device=secondary_dets.device, dtype=secondary_dets.dtype)
-            
-            # Copy bbox and confidence columns
-            aligned_secondary[..., :bbox_conf_cols] = secondary_dets[..., :bbox_conf_cols]
-            
-            # Place secondary classes at the end (after medium classes)
-            start_idx = bbox_conf_cols + medium_classes
-            end_idx = start_idx + secondary_classes
-            aligned_secondary[..., start_idx:end_idx] = secondary_dets[..., bbox_conf_cols:bbox_conf_cols+secondary_classes]
-                    
-            secondary_dets = aligned_secondary
-            LOGGER.info(f"Placed secondary model classes at the end (columns {start_idx}-{end_idx-1})")
+        # Copy primary detections (already aligned with merged classes since primary comes first)
+        output[:, :primary_dets.shape[1], :primary_dets.shape[2]] = primary_dets
         
-        batch_size = medium_dets.shape[0]
-        combined_detections = []
+        # Remap secondary detections to merged class space
+        secondary_start_idx = primary_dets.shape[1]
         
-        LOGGER.info(f"Processing {batch_size} batches, medium_dets shape: {medium_dets.shape}, secondary_dets shape: {secondary_dets.shape}")
+        # Copy bbox and confidence (first 5 columns)
+        output[:, secondary_start_idx:, :bbox_conf_cols] = secondary_dets[:, :, :bbox_conf_cols]
         
-        for batch_idx in range(batch_size):
-            medium_batch = medium_dets[batch_idx]
-            secondary_batch = secondary_dets[batch_idx]
-            
-            LOGGER.info(f"Batch {batch_idx}: medium_batch shape: {medium_batch.shape}, secondary_batch shape: {secondary_batch.shape}")
-            
-            # Filter out predictions with confidence = 0 (empty slots)
-            medium_valid = medium_batch[medium_batch[:, 4] > 0]  # conf > 0
-            secondary_valid = secondary_batch[secondary_batch[:, 4] > 0]  # conf > 0
-            
-            LOGGER.info(f"Batch {batch_idx}: medium_valid: {len(medium_valid)}, secondary_valid: {len(secondary_valid)}")
-            if len(medium_valid) > 0:
-                LOGGER.info(f"Medium valid confidences: {medium_valid[:5, 4]}")  # Show first 5 confidence scores
-            if len(secondary_valid) > 0:
-                LOGGER.info(f"Secondary valid confidences: {secondary_valid[:5, 4]}")  # Show first 5 confidence scores
-            
-            if len(secondary_valid) == 0 and len(medium_valid) == 0:
-                # No valid detections from either model
-                LOGGER.info(f"Batch {batch_idx}: No valid detections from either model")
-                combined_detections.append(medium_batch)  # Keep original shape
-                continue
-            elif len(secondary_valid) == 0:
-                # Only medium detections
-                LOGGER.info(f"Batch {batch_idx}: Only medium detections ({len(medium_valid)})")
-                combined_detections.append(medium_batch)
-                continue
-            elif len(medium_valid) == 0:
-                # Only secondary detections, pad to match original shape
-                LOGGER.info(f"Batch {batch_idx}: Only secondary detections ({len(secondary_valid)})")
-                padded_secondary = torch.zeros_like(medium_batch)
-                padded_secondary[:len(secondary_valid)] = secondary_valid
-                combined_detections.append(padded_secondary)
-                continue
-            
-            # Remove medium detections that overlap with secondary detections
-            LOGGER.info(f"Batch {batch_idx}: Filtering overlaps, IoU threshold: {self.iou_threshold}")
-            non_overlapping_medium = self._filter_overlapping_detections(
-                medium_valid, secondary_valid, self.iou_threshold
-            )
-            
-            LOGGER.info(f"Batch {batch_idx}: After overlap filtering: {len(non_overlapping_medium)} medium detections remain")
-            
-            # Combine secondary (priority) + non-overlapping medium
-            all_dets = torch.cat([secondary_valid, non_overlapping_medium], dim=0)
-            LOGGER.info(f"Batch {batch_idx}: Combined detections: {len(all_dets)} total")
-            
-            # Pad to match original tensor shape if needed
-            combined_batch = torch.zeros_like(medium_batch)
-            num_dets = min(len(all_dets), combined_batch.shape[0])
-            combined_batch[:num_dets] = all_dets[:num_dets]
-            
-            LOGGER.info(f"Batch {batch_idx}: Final combined_batch non-zero entries: {(combined_batch[:, 4] > 0).sum()}")
-            
-            combined_detections.append(combined_batch)
+        # Remap class probabilities using the mapping
+        for sec_idx, merged_idx in self.secondary_to_merged_map.items():
+            # Copy class probability from secondary position to merged position
+            output[:, secondary_start_idx:, bbox_conf_cols + merged_idx] = \
+                secondary_dets[:, :, bbox_conf_cols + sec_idx]
         
-        # Stack back into batch format
-        combined_tensor = torch.stack(combined_detections, dim=0)
-        
-        # Return in the same format as input (tuple if it was tuple)
-        if isinstance(medium_preds, tuple):
-            return (combined_tensor,) + medium_preds[1:]
-        else:
-            return combined_tensor
-
-    def _filter_overlapping_detections(self, medium_dets, secondary_dets, iou_threshold):
-        """Filter out medium detections that overlap with secondary detections.
-        
-        Args:
-            medium_dets: Medium model detections [N, 6+]
-            secondary_dets: Secondary model detections [M, 6+] (takes priority)
-            iou_threshold: IoU threshold for overlap detection
-            
-        Returns:
-            Non-overlapping medium detections
-        """
-        if len(medium_dets) == 0 or len(secondary_dets) == 0:
-            LOGGER.info(f"Early return: medium_dets: {len(medium_dets)}, secondary_dets: {len(secondary_dets)}")
-            return medium_dets
-        
-        # Limit the number of detections to prevent memory issues during ONNX export
-        max_dets = 100  # Reasonable limit for real-world scenarios
-        medium_dets_limited = medium_dets[:max_dets] if len(medium_dets) > max_dets else medium_dets
-        secondary_dets_limited = secondary_dets[:max_dets] if len(secondary_dets) > max_dets else secondary_dets
-        
-        LOGGER.info(f"Overlap filtering: medium {len(medium_dets)} -> {len(medium_dets_limited)}, secondary {len(secondary_dets)} -> {len(secondary_dets_limited)}")
-            
-        # Calculate IoU between limited sets of detections
-        ious = self._calculate_iou_matrix(medium_dets_limited[:, :4], secondary_dets_limited[:, :4])
-        LOGGER.info(f"IoU matrix shape: {ious.shape}, max IoU: {ious.max():.3f}")
-        
-        # Find medium detections that don't overlap significantly with any secondary detection
-        max_ious_per_medium = ious.max(dim=1)[0]  # Max IoU for each medium detection
-        non_overlapping_mask = max_ious_per_medium < iou_threshold
-        
-        LOGGER.info(f"Non-overlapping detections: {non_overlapping_mask.sum()}/{len(medium_dets_limited)}")
-        
-        # Apply mask to original (potentially larger) set of medium detections
-        if len(medium_dets) > max_dets:
-            # If we had to limit, be conservative and only return the processed subset
-            result = medium_dets_limited[non_overlapping_mask]
-        else:
-            result = medium_dets[non_overlapping_mask]
-            
-        LOGGER.info(f"Returning {len(result)} non-overlapping medium detections")
-        return result
-
-    def _calculate_iou_matrix(self, boxes1, boxes2):
-        """Calculate IoU matrix between two sets of boxes - memory optimized.
-        
-        Args:
-            boxes1: [N, 4] tensor of boxes (x1, y1, x2, y2)
-            boxes2: [M, 4] tensor of boxes (x1, y1, x2, y2)
-            
-        Returns:
-            [N, M] tensor of IoU values
-        """
-        # Use efficient broadcasting without creating large intermediate tensors
-        N, M = boxes1.shape[0], boxes2.shape[0]
-        
-        # Calculate areas once
-        area1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])  # [N]
-        area2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])  # [M]
-        
-        # Reshape for broadcasting: [N, 1] and [1, M]
-        area1 = area1.unsqueeze(1)  # [N, 1]
-        area2 = area2.unsqueeze(0)  # [1, M]
-        
-        # Calculate intersection more efficiently
-        x1 = torch.max(boxes1[:, 0:1], boxes2[:, 0:1].t())  # [N, M]
-        y1 = torch.max(boxes1[:, 1:2], boxes2[:, 1:2].t())  # [N, M]
-        x2 = torch.min(boxes1[:, 2:3], boxes2[:, 2:3].t())  # [N, M]
-        y2 = torch.min(boxes1[:, 3:4], boxes2[:, 3:4].t())  # [N, M]
-        
-        # Calculate intersection area
-        inter_area = torch.clamp(x2 - x1, min=0) * torch.clamp(y2 - y1, min=0)
-        
-        # Calculate union area and IoU
-        union_area = area1 + area2 - inter_area
-        iou = inter_area / (union_area + 1e-6)
-        
-        return iou
+        return (output,)
 
     def register_preprocessing_hook(self):
         """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
@@ -1315,7 +1189,7 @@ class OneberryYolo(nn.Module):
                 x = x.float()
                 x = module.transform(x)
             x = x.half() if module.fp16 else x.float()
-            x = x / 255.0  # 0-255 to 0.0-1.0
+            x = x  # 0-255 to 0.0-1.0
             return x
 
         return tuple(_preprocess(inp) for inp in inputs)
@@ -1338,11 +1212,13 @@ class OneberryYolo(nn.Module):
 
         # Convert first item (detection outputs) to float if needed
         detections = (_to_float(detections[0]),) + detections[1:]
+        
+        print(detections[0].shape)
 
         return detections
 
     def prepare_for_export(self, dynamic: bool = False):
         """Prepare both models for export."""
         LOGGER.info(f"✨ Preparing {self.__class__.__name__} for export...")
-        self.medium_model.prepare_for_export(dynamic)
+        self.primary_model.prepare_for_export(dynamic)
         self.secondary_model.prepare_for_export(dynamic)
