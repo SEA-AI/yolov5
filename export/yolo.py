@@ -33,7 +33,7 @@ Example (SeaYOLO - single model):
         --fname yolo.onnx
 
 Example (OneberryYolo - dual model with overlap handling):
-    # Combine medium and secondary models where secondary takes precedence over overlaps:
+    # Combine primary and secondary models where secondary takes precedence over overlaps:
     python export/yolo.py \
         --det_weights yolov5m.pt \
         --secondary_weights yolov5n.pt \
@@ -51,6 +51,8 @@ import argparse
 import sys
 from pathlib import Path
 from typing import Tuple
+
+import torch
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
@@ -85,7 +87,7 @@ def main(
         # Use OneberryYolo for dual-model export
         secondary_weights = get_weights_path(secondary_weights)
         model = OneberryYolo(
-            medium_weights=det_weights,
+            primary_weights=det_weights,
             secondary_weights=secondary_weights,
             fp16=half,
             fuse=fuse,
@@ -103,6 +105,22 @@ def main(
             infsz=infsz,
         )
 
+    # Validate model before export
+    try:
+        # Test forward pass with dummy input
+        dummy_input = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device)
+        dummy_input = dummy_input.half() if half else dummy_input.float()
+        dummy_input /= 255.0
+        
+        with torch.no_grad():
+            _ = model(dummy_input)
+        print("✅ Model validation successful - forward pass works")
+    except Exception as e:
+        print(f"❌ Model validation failed: {e}")
+        print("   Export may fail or produce invalid ONNX model")
+        raise
+
+    # Export to ONNX
     export_model_to_onnx(
         model=model,
         imgsz=imgsz,
@@ -121,7 +139,7 @@ def _parse_args():
         "--det-weights",
         type=str,
         required=True,
-        help="Path to the object detection model weights or W&B artifact (e.g., 'YOLOv5n-IR:latest'). For OneberryYolo, this will be used as the medium model.",
+        help="Path to the object detection model weights or W&B artifact (e.g., 'YOLOv5n-IR:latest'). For OneberryYolo, this will be used as the primary model.",
     )
     parser.add_argument(
         "-sw",
