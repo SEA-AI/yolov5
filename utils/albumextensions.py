@@ -55,6 +55,24 @@ class SafeRandomCrop(A.RandomCrop):
         return {"crop_coords": crop_coords}
 
 
+class ThermalRandomBrightnessContrast(A.RandomBrightnessContrast):
+    """Random brightness and contrast adjustment for thermal images."""
+
+    def apply(self, img: np.ndarray, alpha: float, beta: float, **params: Any) -> np.ndarray:
+        if not is_grayscale(img):
+            return img
+        return super().apply(img, alpha, beta, **params)
+
+
+class ThermalRandomGamma(A.RandomGamma):
+    """Random gamma adjustment for thermal images."""
+
+    def apply(self, img: np.ndarray, gamma: float, **params: Any) -> np.ndarray:
+        if not is_grayscale(img):
+            return img
+        return super().apply(img, gamma, **params)
+
+
 class ThermalHorizontalMotionBlur(A.ImageOnlyTransform):
     """Simulate left-right (horizontal) thermal motion blur by convolving with an exponential decay kernel.
 
@@ -136,20 +154,11 @@ class ThermalHorizontalMotionBlur(A.ImageOnlyTransform):
         self.noise_std_range = cast("Tuple[float, float]", noise_std_range)
         self.skip_rgb = skip_rgb
 
-    def _is_grayscale(self, img: np.ndarray, tol: float = 1e-6) -> bool:
-        if img.ndim == 2:
-            return True
-        if img.ndim != 3 or img.shape[2] != 3:
-            return False
-        # Check all channels same (within tol)
-        diff = img.max(axis=2) - img.min(axis=2)
-        return diff.max() <= tol
-
     def apply(
         self, img: np.ndarray, kernel: np.ndarray, anchor: tuple[int, int], noise_std: float, **params: Any
     ) -> np.ndarray:
         # Blur is only applied to grayscale images
-        if not self._is_grayscale(img) and self.skip_rgb:
+        if not is_grayscale(img) and self.skip_rgb:
             return img
 
         # blur image
@@ -323,3 +332,14 @@ class ResizeIfNeeded(DualTransform):
 
     def get_transform_init_args_names(self) -> Tuple[str, ...]:
         return ("max_size", "max_size_hw", "interpolation")
+
+
+def is_grayscale(img: np.ndarray, tol: float = 1e-6) -> bool:
+    """Naive check if an image is grayscale."""
+    if img.ndim == 2:
+        return True
+    if img.ndim != 3 or img.shape[2] != 3:
+        return False
+    # Check all channels same (within tol)
+    diff = img.max(axis=2) - img.min(axis=2)
+    return diff.max() <= tol
