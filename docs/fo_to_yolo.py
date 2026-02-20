@@ -287,7 +287,8 @@ def export_dataset(
         if d.startswith("tmp_"):
             fo.delete_dataset(d)
 
-    out_dir = Path(export_dir) / dataset_name
+    folder_name = f"{dataset_name}_{tags_suffix}"
+    out_dir = Path(export_dir) / folder_name
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -367,7 +368,7 @@ def export_dataset(
 
     # --- Export ---
     print("[6/6] Exporting to YOLO format...")
-    export_splits(export, tags_suffix, export_dir, dataset_name, label_field, classes, split_mode, debug)
+    export_splits(export, tags_suffix, export_dir, folder_name, label_field, classes, split_mode, debug)
 
     # --- Label distribution plot ---
     counts_by_split: dict[str, dict] = {}
@@ -414,7 +415,7 @@ def export_dataset(
         }
         register_in_wandb(
             export_dir=export_dir,
-            dataset_name=dataset_name,
+            dataset_name=folder_name,
             params=params,
             wandb_entity=wandb_entity,
             wandb_collection=wandb_collection,
