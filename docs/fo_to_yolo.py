@@ -200,6 +200,16 @@ def export_splits(
             export_media=True,
         )
 
+    # Patch dataset.yaml: replace the absolute 'path' with '.' so the dataset
+    # is portable (works wherever the folder is placed or downloaded from W&B).
+    yaml_path = Path(export_dir) / dataset_name / "dataset.yaml"
+    if yaml_path.exists():
+        with open(yaml_path) as f:
+            data = yaml.safe_load(f)
+        data["path"] = "."
+        with open(yaml_path, "w") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
 
 def register_in_wandb(
     export_dir: str,
