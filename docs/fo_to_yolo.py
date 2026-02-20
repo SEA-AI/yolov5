@@ -3,8 +3,8 @@ Export a FiftyOne dataset to YOLO format with optional Weights & Biases registra
 
 Steps:
 1. (Optional) Filter by FiftyOne sample tags.
-2. Subsample to a target annotated/background ratio.
-3. Split into train/val, put all samples in one split, or let the caller decide.
+2. (Optional) Subsample to a target annotated/background ratio; omit to use all samples.
+3. Split into train/val, put all samples in one split, or use existing split tags.
 4. Apply a class-mapping YAML (unmapped labels are dropped).
 5. (Optional) Redirect filepaths to 16-bit PNG images.
 6. Export in YOLOv5 format.
@@ -18,7 +18,7 @@ python fo_to_yolo.py \\
   --class-map "data/class_map.yaml" \\
   --split-mode split \\
   --split-by sequence \\
-  --noise-ratio 0.25 \\
+  --noise-ratio 0.25 \\        # omit to use all samples
   --val-ratio 0.2 \\
   --label-field ground_truth_det \\
   --use-16bit \\
