@@ -22,7 +22,7 @@ python fo_to_yolo.py \\
   --val-ratio 0.2 \\
   --label-field ground_truth_det \\
   --use-16bit \\
-  --wandb --wandb-entity my-org --wandb-collection my-collection \\
+  --wandb --wandb-entity my-team --wandb-org my-org --wandb-collection my-collection \\
   --tags-suffix v2 \\
   --fo-tags tag_one tag_two \\
   --seed 42
@@ -217,8 +217,9 @@ def register_in_wandb(
     params: dict,
     wandb_entity: str,
     wandb_collection: str,
+    wandb_org: str | None = None,
 ) -> None:
-    """Upload dataset artifact to the W&B Dataset Registry."""
+    """Upload dataset artifact to W&B. If wandb_org is provided, also link to the Dataset Registry."""
     import wandb
 
     # A run is required by W&B to upload artifacts. We use a fixed internal
@@ -242,12 +243,14 @@ def register_in_wandb(
 
         logged = run.log_artifact(artifact)
         logged.wait()
-        run.link_artifact(
-            logged,
-            target_path=f"{wandb_entity}/wandb-registry-dataset/{wandb_collection}",
-        )
+        print(f"  artifact '{wandb_collection}' uploaded to project '{wandb_entity}/dataset-registry'")
 
-    print(f"  dataset linked to registry collection '{wandb_collection}'")
+        if wandb_org:
+            run.link_artifact(
+                logged,
+                target_path=f"{wandb_org}/wandb-registry-dataset/{wandb_collection}",
+            )
+            print(f"  artifact linked to registry collection '{wandb_org}/{wandb_collection}'")
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +272,7 @@ def export_dataset(
     register_wandb: bool = False,
     wandb_entity: str | None = None,
     wandb_collection: str | None = None,
+    wandb_org: str | None = None,
     tags_suffix: str = "v0",
     fo_tags: list[str] | None = None,
     seed: int = 42,
@@ -414,6 +418,7 @@ def export_dataset(
             params=params,
             wandb_entity=wandb_entity,
             wandb_collection=wandb_collection,
+            wandb_org=wandb_org,
         )
 
     fo.delete_dataset(tmp_name)
@@ -472,8 +477,9 @@ def parse_args() -> argparse.Namespace:
 
     # Weights & Biases
     parser.add_argument("--wandb", action="store_true", dest="register_wandb", help="Upload dataset to the W&B Dataset Registry.")
-    parser.add_argument("--wandb-entity", default=None, help="W&B entity (username or org). Required when --wandb is set.")
-    parser.add_argument("--wandb-collection", default=None, help="Registry collection name. Defaults to --dataset-name if not set.")
+    parser.add_argument("--wandb-entity", default=None, help="W&B team entity. Required when --wandb is set.")
+    parser.add_argument("--wandb-collection", default=None, help="Artifact/collection name. Defaults to --dataset-name if not set.")
+    parser.add_argument("--wandb-org", default=None, help="W&B organization entity for Dataset Registry linking. If omitted, artifact is uploaded to the project but not linked to the registry.")
 
     # Misc
     parser.add_argument("--debug", action="store_true", help="Export only 100 samples per split (for quick testing).")
