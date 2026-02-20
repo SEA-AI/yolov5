@@ -293,11 +293,14 @@ def export_dataset(
     print(f"  {len(dataset)} samples" + (f" (filtered by tags {fo_tags})" if fo_tags else ""))
 
     # --- Uniqueness ---
-    if not dataset.has_field("uniqueness"):
-        print("[2/6] Computing uniqueness (first time only)...")
-        fob.compute_uniqueness(dataset)
+    if noise_ratio is not None:
+        if not dataset.has_field("uniqueness"):
+            print("[2/6] Computing uniqueness (first time only)...")
+            fob.compute_uniqueness(dataset)
+        else:
+            print("[2/6] Uniqueness already computed, skipping.")
     else:
-        print("[2/6] Uniqueness already computed, skipping.")
+        print("[2/6] Skipping uniqueness (no subsampling requested).")
 
     # --- Subsample ---
     if noise_ratio is not None:
