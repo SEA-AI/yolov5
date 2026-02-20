@@ -262,7 +262,7 @@ def export_dataset(
     description: str = "",
     split_mode: str = "split",
     split_by: str = "trip",
-    noise_ratio: float = 0.25,
+    noise_ratio: float | None = None,
     val_ratio: float = 0.2,
     use_16bit: bool = False,
     label_field: str = "ground_truth_det",
@@ -300,14 +300,26 @@ def export_dataset(
         print("[2/6] Uniqueness already computed, skipping.")
 
     # --- Subsample ---
-    print(f"[3/6] Subsampling (noise_ratio={noise_ratio})...")
-    subset = subsample_dataset(dataset, noise_ratio, label_field, seed)
-    print(f"  {len(subset)} samples after subsampling")
+    if noise_ratio is not None:
+        print(f"[3/6] Subsampling (noise_ratio={noise_ratio})...")
+        subset = subsample_dataset(dataset, noise_ratio, label_field, seed)
+        print(f"  {len(subset)} samples after subsampling")
+    else:
+        print("[3/6] Skipping subsampling (using all samples).")
+        subset = dataset
 
     # --- Split ---
     print(f"[4/6] Tagging splits (split_mode='{split_mode}')...")
     if split_mode == "split":
-        if split_by == "random":
+        existing_tags = set(subset.count_values("tags").keys())
+        train_tag, val_tag = f"TRAIN_{tags_suffix}", f"VAL_{tags_suffix}"
+        if train_tag in existing_tags and val_tag in existing_tags:
+            n_train = len(subset.match_tags(train_tag))
+            n_val = len(subset.match_tags(val_tag))
+            total = n_train + n_val
+            print(f"  using existing split tags '{train_tag}' / '{val_tag}'")
+            print(f"  train/val split: {n_train/total:.2f} / {n_val/total:.2f}")
+        elif split_by == "random":
             subset = split_random(subset, val_ratio, tags_suffix, seed)
         else:
             subset = split_by_field(subset, split_by, val_ratio, tags_suffix)
@@ -444,8 +456,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--noise-ratio",
         type=float,
-        default=0.25,
-        help="Max ratio of background (unannotated) samples relative to annotated samples.",
+        default=None,
+        help="Max ratio of background (unannotated) samples relative to annotated samples. Omit to use all samples.",
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducible subsampling and splits.")
 
