@@ -490,7 +490,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    args.description = input("Dataset description (press Enter to skip): ").strip()
+    args.description = input("Dataset description (required): ").strip()
+    if not args.description:
+        print("Error: a description is required. Aborting.")
+        return
     export_dataset(**vars(args))
 
 
