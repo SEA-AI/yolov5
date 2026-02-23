@@ -59,14 +59,21 @@ def is_wandb_ref(entry: str) -> bool:
     return not Path(entry).exists()
 
 
+def names_as_list(names) -> list[str]:
+    """Normalise names to a flat list for comparison, handling both list and dict formats."""
+    if isinstance(names, dict):
+        return [str(names[k]) for k in sorted(names.keys())]
+    return [str(n) for n in names]
+
+
 def validate_classes(yamls: list[tuple[Path, dict]]) -> list[str]:
-    """Ensure all datasets share the same class list and return it."""
-    all_names = [(str(d), tuple(y["names"])) for d, y in yamls]
+    """Ensure all datasets share the same class list. Returns the raw names from the first yaml."""
+    all_names = [(str(d), tuple(names_as_list(y["names"]))) for d, y in yamls]
     unique = set(names for _, names in all_names)
     if len(unique) > 1:
         lines = "\n".join(f"  {d}: {list(names)}" for d, names in all_names)
         raise ValueError(f"Datasets have inconsistent class lists:\n{lines}")
-    return list(yamls[0][1]["names"])
+    return yamls[0][1]["names"]  # return as-is from the source yaml
 
 
 def download_artifact(ref: str, download_dir: str) -> str:
@@ -157,7 +164,7 @@ def register_in_wandb(
         config={
             "description": description,
             "datasets": dataset_dirs,
-            "classes": classes,
+            "classes": names_as_list(classes),
             "source_artifacts": wandb_refs,
         },
     ) as run:
@@ -170,7 +177,7 @@ def register_in_wandb(
             name=wandb_collection,
             type="dataset",
             description=description,
-            metadata={"datasets": dataset_dirs, "classes": classes},
+            metadata={"datasets": dataset_dirs, "classes": names_as_list(classes)},
         )
         artifact.add_dir(str(output_dir))
 
@@ -258,9 +265,9 @@ def combine_datasets(
     # --- Write combined dataset.yaml ---
     combined: dict = {"path": ".", "nc": len(classes), "names": classes}
     if has_train:
-        combined["train"] = "images/train"
+        combined["train"] = "./images/train/"
     if has_val:
-        combined["val"] = "images/val"
+        combined["val"] = "./images/val/"
 
     yaml_path = output_path / "dataset.yaml"
     with open(yaml_path, "w", encoding="utf-8") as f:
@@ -273,7 +280,7 @@ def combine_datasets(
     if has_val:
         n_val = len(list((output_path / "images" / "val").iterdir()))
         print(f"  val images   : {n_val}")
-    print(f"  classes      : {classes}")
+    print(f"  classes      : {names_as_list(classes)}")
     print(f"\nTrain with: python train.py --data {yaml_path}")
 
     # --- Description ---
