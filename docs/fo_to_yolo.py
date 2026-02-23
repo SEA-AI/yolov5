@@ -16,16 +16,19 @@ python fo_to_yolo.py \\
   --dataset-name "TRAIN_RL_SPLIT_THERMAL_2024_03" \\
   --export-dir "/mnt/datasets/yolo" \\
   --class-map "data/class_map.yaml" \\
-  --split-mode split \\
-  --split-by sequence \\
-  --noise-ratio 0.25 \\        # omit to use all samples
+  --split-mode split \\       # split | train | val
+  --split-by sequence \\      # field name | random (ignored if split tags already exist)
+  --noise-ratio 0.25 \\       # omit to use all samples
   --val-ratio 0.2 \\
   --label-field ground_truth_det \\
   --use-16bit \\
-  --wandb --wandb-entity my-team --wandb-org my-org --wandb-collection my-collection \\
-  --tags-suffix v2 \\
-  --fo-tags tag_one tag_two \\
+  --wandb --wandb-entity sea-ai --wandb-org sea-ai-org --wandb-collection my-collection \\  # omit --wandb to skip upload entirely
+                                                                                          # omit --wandb-org to upload artifact but skip registry linking (it will not great a dataset in the registry, but the artifact will still be available in the project and can be linked manually later)
+                                                                                          # omit --wandb-collection to use --dataset-name as the artifact name
+  --tags-suffix v0 \\   #dataset version suffix for the TRAIN_/VAL_ tags (e.g. v0, v1, etc.); only relevant if --split-mode is split
+  --fo-tags tag_one tag_two \\   # optional pre-filtering by FiftyOne sample tags; omit to use all samples in the dataset
   --seed 42
+  # A description will be prompted interactively and is required to proceed.
 """
 
 import argparse
