@@ -60,7 +60,7 @@ python docs/fo_to_yolo.py \
 
 ### Combine datasets
 
-Use `docs/combine_datasets.py` to merge multiple exported datasets into a single `dataset.yaml` for training. All source datasets must share the same class list.
+Use `docs/combine_datasets.py` to merge multiple exported datasets into a single self-contained dataset for training. All source datasets must share the same class list.
 
 Each entry in `--datasets` can be a local path or a W&B artifact reference — they can be mixed freely.
 
@@ -68,6 +68,7 @@ Each entry in `--datasets` can be a local path or a W&B artifact reference — t
 # Local paths
 python docs/combine_datasets.py \
   --datasets "/home/sea-ai/Documents/DATASET_A_v0" "/home/sea-ai/Documents/DATASET_B_v0" \
+  --output-dir "/home/sea-ai/Documents/COMBINED_v0" \
   --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
 
 # W&B artifact refs — no local setup needed, downloaded automatically
@@ -76,11 +77,15 @@ python docs/combine_datasets.py \
   --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
 ```
 
+- A description is prompted interactively and is **required** to proceed.
 - Local paths and W&B artifact refs can be mixed freely.
-- `--output` and `--download-dir` are optional — both default to a temp directory if not set.
+- `--output-dir` and `--download-dir` are optional — both default to a temp directory if not set.
+- Images and labels from all source datasets are copied into `images/` and `labels/`, prefixed with `d0_`, `d1_`, etc. to avoid filename collisions.
+- `dataset.yaml` uses `path: .` (portable — works wherever the folder is moved or downloaded from W&B).
+- The W&B artifact contains the full combined dataset (images + labels + yaml) — self-contained and usable on any machine.
 - W&B artifact entries are declared as lineage inputs in the uploaded artifact.
-- No data is re-uploaded — only the combined `dataset.yaml` is stored as a W&B artifact.
-- Pass the output YAML directly to training: `python train.py --data /path/to/combined.yaml`.
+- Omit `--wandb-org` to upload the artifact without linking to the Dataset Registry.
+- Pass the output YAML directly to training: `python train.py --data /path/to/combined/dataset.yaml`.
 
 ### Training IR Entrypoint
 
