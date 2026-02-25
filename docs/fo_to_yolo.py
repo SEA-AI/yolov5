@@ -230,7 +230,7 @@ def register_in_wandb(
     with wandb.init(
         entity=wandb_entity,
         project="dataset-registry",
-        name=f"{wandb_collection}_{params.get('tags_suffix', 'v0')}",
+        name=wandb_collection,
         config=params,
         job_type="dataset-upload",
     ) as run:
