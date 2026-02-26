@@ -211,7 +211,7 @@ def export_splits(
             data = yaml.safe_load(f)
         data["path"] = "."
         with open(yaml_path, "w") as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+            yaml.safe_dump(data, f, default_flow_style=False, allow_unicode=True)
 
 
 def register_in_wandb(

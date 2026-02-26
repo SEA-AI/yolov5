@@ -271,7 +271,7 @@ def combine_datasets(
 
     yaml_path = output_path / "dataset.yaml"
     with open(yaml_path, "w", encoding="utf-8") as f:
-        yaml.dump(combined, f, default_flow_style=False, allow_unicode=True)
+        yaml.safe_dump(combined, f, default_flow_style=False, allow_unicode=True)
 
     print(f"\nCombined dataset written → {output_dir}")
     if has_train:
