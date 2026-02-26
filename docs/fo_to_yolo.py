@@ -53,7 +53,7 @@ from fiftyone import ViewField as F
 
 def read_yaml(yaml_file: str) -> dict:
     with open(yaml_file, "r", encoding="utf-8") as f:
-        return yaml.load(f, Loader=yaml.FullLoader)
+        return yaml.safe_load(f)
 
 
 def load_dataset(dataset_name: str, fo_tags: list[str] | None = None) -> fo.DatasetView:
@@ -391,7 +391,7 @@ def export_dataset(
     # --- Class map YAML ---
     class_map_yaml = out_dir / "class_map.yaml"
     with open(class_map_yaml, "w", encoding="utf-8") as f:
-        yaml.dump(class_map, f, default_flow_style=False, allow_unicode=True)
+        yaml.safe_dump(class_map, f, default_flow_style=False, allow_unicode=True)
     print(f"  class map saved → {class_map_yaml}")
 
     # --- Description ---
