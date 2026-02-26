@@ -88,6 +88,29 @@ def download_artifact(ref: str, download_dir: str) -> str:
     return dest
 
 
+def validate_split(out_dir: Path, split: str) -> None:
+    """Raise if a split directory is missing, empty, or has mismatched image/label counts."""
+    img_dir = out_dir / "images" / split
+    lbl_dir = out_dir / "labels" / split
+
+    if not img_dir.exists() or not lbl_dir.exists():
+        raise FileNotFoundError(f"Missing directory for split '{split}': expected {img_dir} and {lbl_dir}")
+
+    image_exts = {".jpg", ".jpeg", ".png"}
+    n_images = sum(1 for f in img_dir.iterdir() if f.suffix.lower() in image_exts)
+    n_labels = sum(1 for f in lbl_dir.iterdir() if f.suffix == ".txt")
+
+    if n_images == 0:
+        raise ValueError(f"No images found in '{img_dir}'")
+    if n_labels == 0:
+        raise ValueError(f"No label files found in '{lbl_dir}'")
+    if n_images != n_labels:
+        raise ValueError(
+            f"Image/label count mismatch in split '{split}': {n_images} images vs {n_labels} labels"
+        )
+    print(f"  {split}: {n_images} images, {n_labels} labels — OK")
+
+
 def copy_split(
     dataset_dir: Path,
     yaml_data: dict,
@@ -262,8 +285,15 @@ def combine_datasets(
         if copy_split(dataset_dir, y, "val", output_path, prefix):
             has_val = True
 
+    # --- Validate ---
+    print("  validating combined dataset...")
+    if has_train:
+        validate_split(output_path, "train")
+    if has_val:
+        validate_split(output_path, "val")
+
     # --- Write combined dataset.yaml ---
-    combined: dict = {"path": ".", "nc": len(classes), "names": classes}
+    combined: dict = {"path": ".", "names": classes}
     if has_train:
         combined["train"] = "./images/train/"
     if has_val:

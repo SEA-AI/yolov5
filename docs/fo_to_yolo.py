@@ -143,6 +143,29 @@ def apply_category_map(
     return dataset.map_labels(label_field, class_map)
 
 
+def validate_split(out_dir: Path, split: str) -> None:
+    """Raise if a split directory is missing, empty, or has mismatched image/label counts."""
+    img_dir = out_dir / "images" / split
+    lbl_dir = out_dir / "labels" / split
+
+    if not img_dir.exists() or not lbl_dir.exists():
+        raise FileNotFoundError(f"Missing directory for split '{split}': expected {img_dir} and {lbl_dir}")
+
+    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
+    n_images = sum(1 for f in img_dir.iterdir() if f.suffix.lower() in image_exts)
+    n_labels = sum(1 for f in lbl_dir.iterdir() if f.suffix == ".txt")
+
+    if n_images == 0:
+        raise ValueError(f"No images found in '{img_dir}'")
+    if n_labels == 0:
+        raise ValueError(f"No label files found in '{lbl_dir}'")
+    if n_images != n_labels:
+        raise ValueError(
+            f"Image/label count mismatch in split '{split}': {n_images} images vs {n_labels} labels"
+        )
+    print(f"  {split}: {n_images} images, {n_labels} labels — OK")
+
+
 def plot_label_distribution(counts_by_split: dict[str, dict], save_path: str) -> plt.Figure:
     """Bar chart of label counts per split, saved to *save_path*."""
     splits = list(counts_by_split.keys())
@@ -372,6 +395,13 @@ def export_dataset(
     # --- Export ---
     print("[6/6] Exporting to YOLO format...")
     export_splits(export, tags_suffix, export_dir, folder_name, label_field, classes, split_mode, debug)
+
+    # --- Validate ---
+    print("  validating export...")
+    if split_mode in ("split", "train"):
+        validate_split(out_dir, "train")
+    if split_mode in ("split", "val"):
+        validate_split(out_dir, "val")
 
     # --- Label distribution plot ---
     counts_by_split: dict[str, dict] = {}
