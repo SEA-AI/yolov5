@@ -77,7 +77,7 @@ def subsample_dataset(
     annotated = dataset.exists(f"{label_field}.detections", True)
     noise = dataset.exists(f"{label_field}.detections", False)
     n_noise = min(len(noise), int(len(annotated) * noise_ratio))
-    return annotated + noise.sort_by("uniqueness", reverse=True).take(n_noise, seed=seed)
+    return annotated + noise.sort_by("uniqueness", reverse=True).limit(n_noise)
 
 
 def split_by_field(
