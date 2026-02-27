@@ -14,6 +14,7 @@ from models.yolo import BaseModel, Detect, DetectionModel
 from utils.general import LOGGER, scale_boxes
 from utils.plots import feature_visualization
 from utils.torch_utils import is_obb_weights, select_device
+from utils.export import get_weights_path, transform_sz
 
 
 class OBBModel(UBaseModel):
@@ -360,23 +361,26 @@ class YOLO(nn.Module):
         device: Union[str, torch.device] = "",
         fp16: bool = False,
         fuse: bool = True,
-        imgsz: Tuple[int, int] = (640, 640),
-        infsz: Optional[Tuple[int, int]] = None,
+        imgsz: int | Tuple[int, int] = 640,
+        infsz: int | Tuple[int, int] | None = None,
     ):
         """Initialize YOLO. Pass one path for single model, N paths for ensemble (merged output)."""
         super().__init__()
+        self.obj_det_weights = weights[0] if len(weights) == 1 else weights  # saved in onnx model metadata
+
         weights_list = [weights] if isinstance(weights, str) else list(weights)
         if not weights_list:
             raise ValueError("weights must be at least one path")
-        self._weights_list = weights_list
-        self._det_models = [ObjectsModel(w, device=device, fp16=fp16, fuse=fuse) for w in weights_list]
+        self._det_models = [
+            ObjectsModel(get_weights_path(w), device=device, fp16=fp16, fuse=fuse) for w in weights_list
+        ]
         # First model drives device, stride, and preprocessing
         self.obj_det = self._det_models[0]
         self.device = self.obj_det.device
         self.fp16 = fp16
         self.stride = self.obj_det.stride
-        self.imgsz = imgsz
-        self.infsz = infsz if infsz is not None else imgsz
+        self.imgsz = transform_sz(imgsz)
+        self.infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
         self.hooks = {}
         self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
 
@@ -386,7 +390,6 @@ class YOLO(nn.Module):
         if len(self._det_models) > 1:
             LOGGER.info(f"YOLO ensemble: {len(self._det_models)} models, merged classes={shared_classes}")
 
-        self.obj_det_weights = self._weights_list[0]  # backward compat (e.g. export.py)
         LOGGER.debug(
             f"YOLO model info: model.type={type(self.obj_det.model).__name__}, "
             f"save={self.obj_det.save}, stride={self.obj_det.stride}"
@@ -558,7 +561,7 @@ class AHOY(YOLO):
             An instance of either AHOYv1 or AHOYv2 based on the model path.
         """
 
-        if is_obb_weights(hor_det_weights):
+        if is_obb_weights(get_weights_path(hor_det_weights)):
             return super().__new__(AHOYv2)
         return super().__new__(AHOYv1)
 
@@ -569,8 +572,8 @@ class AHOY(YOLO):
         device: Union[str, torch.device] = "",  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
-        imgsz: Tuple[int, int] = (640, 640),
-        infsz: Optional[Tuple[int, int]] = None,
+        imgsz: int | Tuple[int, int] = 640,
+        infsz: int | Tuple[int, int] | None = None,
     ):
         """Initialize AHOY model with object detection and horizon detection.
 
@@ -595,8 +598,8 @@ class AHOY(YOLO):
         )
 
         # Load horizon detection model
-        self.hor_det_weights = hor_det_weights
-        self.hor_det = self.load_hor_det(self.hor_det_weights, device=device, fp16=fp16, fuse=fuse)
+        self.hor_det_weights = hor_det_weights  # saved in onnx model metadata
+        self.hor_det = self.load_hor_det(get_weights_path(self.hor_det_weights), device=device, fp16=fp16, fuse=fuse)
 
         LOGGER.debug(
             f"Object detection model info: "

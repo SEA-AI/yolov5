@@ -54,7 +54,7 @@ ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 
-from utils.export import export_model_to_onnx, get_weights_path, transform_sz
+from utils.export import export_model_to_onnx
 from models.custom import YOLO
 
 
@@ -71,12 +71,8 @@ def main(
     fname: str = "",
 ):
     """Export the YOLO model to ONNX format. One or more weights → single YOLO (ensemble if multiple)."""
-    imgsz = transform_sz(imgsz)
-    infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
-    weights_list = [get_weights_path(w) for w in det_weights]
-
     model = YOLO(
-        weights=weights_list,
+        weights=det_weights,
         fp16=half,
         fuse=fuse,
         imgsz=imgsz,
@@ -86,11 +82,11 @@ def main(
     # Export to ONNX
     export_model_to_onnx(
         model=model,
-        imgsz=imgsz,
+        imgsz=model.imgsz,
         batch_size=batch_size,
         fname=fname,
         dynamic=dynamic,
-        simplify=True if len(weights_list) > 1 else simplify,  # onnx2torch might complain otherwise
+        simplify=True if len(det_weights) > 1 else simplify,  # onnx2torch might complain otherwise
         trt7_compatible=trt7_compatible,
     )
 

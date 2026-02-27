@@ -43,7 +43,7 @@ ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 
-from utils.export import get_weights_path, transform_sz, export_model_to_onnx
+from utils.export import export_model_to_onnx
 from models.custom import AHOY
 
 
@@ -61,12 +61,6 @@ def main(
     fname: str = "",
 ):
     """Export the AHOY model to ONNX format."""
-    # Transform image size to (height, width) format
-    imgsz = transform_sz(imgsz)
-    infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
-    det_weights = get_weights_path(det_weights)
-    hor_weights = get_weights_path(hor_weights)
-
     model = AHOY(
         obj_det_weights=det_weights,
         hor_det_weights=hor_weights,
@@ -78,7 +72,7 @@ def main(
 
     export_model_to_onnx(
         model=model,
-        imgsz=imgsz,
+        imgsz=model.imgsz,
         batch_size=batch_size,
         fname=fname,
         dynamic=dynamic,
