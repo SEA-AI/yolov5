@@ -33,27 +33,26 @@ python fo_to_yolo.py \\
 
 import argparse
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import fiftyone as fo
 import fiftyone.brain as fob
 import matplotlib
+from utils.general import LOGGER
 
 matplotlib.use("Agg")  # non-interactive backend; must be set before pyplot import
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 from fiftyone import ViewField as F
+from utils.dataset_utils import validate_split
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def read_yaml(yaml_file: str) -> dict:
-    with open(yaml_file, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 def load_dataset(dataset_name: str, fo_tags: list[str] | None = None) -> fo.DatasetView:
@@ -71,7 +70,6 @@ def subsample_dataset(
     dataset: fo.DatasetView,
     noise_ratio: float,
     label_field: str,
-    seed: int,
 ) -> fo.DatasetView:
     """Keep all annotated samples and up to noise_ratio * n_annotated background samples."""
     annotated = dataset.exists(f"{label_field}.detections", True)
@@ -93,7 +91,7 @@ def split_by_field(
     train_n = sum(v for k, v in counts.items() if k not in val_keys)
     val_n = sum(v for k, v in counts.items() if k in val_keys)
     total_n = train_n + val_n
-    print(f"  train/val split: {train_n/total_n:.2f} / {val_n/total_n:.2f}")
+    LOGGER.info(f"  train/val split: {train_n/total_n:.2f} / {val_n/total_n:.2f}")
 
     dataset.untag_samples(f"TRAIN_{tags_suffix}")
     dataset.untag_samples(f"VAL_{tags_suffix}")
@@ -117,7 +115,7 @@ def split_random(
     n_val = int(len(ids) * val_ratio)
     val_ids, train_ids = ids[:n_val], ids[n_val:]
     total_n = len(ids)
-    print(f"  train/val split: {len(train_ids)/total_n:.2f} / {n_val/total_n:.2f}")
+    LOGGER.info(f"  train/val split: {len(train_ids)/total_n:.2f} / {n_val/total_n:.2f}")
 
     dataset.untag_samples(f"TRAIN_{tags_suffix}")
     dataset.untag_samples(f"VAL_{tags_suffix}")
@@ -131,39 +129,17 @@ def apply_category_map(
     class_map: dict,
     label_field: str,
 ) -> fo.DatasetView:
-    """Drop labels not in class_map or mapped to 'None', then remap remaining labels."""
+    """Drop labels not in class_map or mapped to 'None', then remap remaining labels.
+
+    Returns a lazy view — the original dataset is never mutated.
+    """
     keep_labels = [k for k, v in class_map.items() if v != "None"]
-    dataset = dataset.filter_labels(
-        label_field,
-        F("label").is_in(keep_labels),
-        only_matches=False,
+    return (
+        dataset
+        .filter_labels(label_field, F("label").is_in(keep_labels), only_matches=False)
+        .map_labels(label_field, class_map)
     )
-    dataset.keep()
-    dataset.save()
-    return dataset.map_labels(label_field, class_map)
 
-
-def validate_split(out_dir: Path, split: str) -> None:
-    """Raise if a split directory is missing, empty, or has mismatched image/label counts."""
-    img_dir = out_dir / "images" / split
-    lbl_dir = out_dir / "labels" / split
-
-    if not img_dir.exists() or not lbl_dir.exists():
-        raise FileNotFoundError(f"Missing directory for split '{split}': expected {img_dir} and {lbl_dir}")
-
-    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
-    n_images = sum(1 for f in img_dir.iterdir() if f.suffix.lower() in image_exts)
-    n_labels = sum(1 for f in lbl_dir.iterdir() if f.suffix == ".txt")
-
-    if n_images == 0:
-        raise ValueError(f"No images found in '{img_dir}'")
-    if n_labels == 0:
-        raise ValueError(f"No label files found in '{lbl_dir}'")
-    if n_images != n_labels:
-        raise ValueError(
-            f"Image/label count mismatch in split '{split}': {n_images} images vs {n_labels} labels"
-        )
-    print(f"  {split}: {n_images} images, {n_labels} labels — OK")
 
 
 def plot_label_distribution(counts_by_split: dict[str, dict], save_path: str) -> plt.Figure:
@@ -213,7 +189,7 @@ def export_splits(
         items = [(f"VAL_{tags_suffix}", "val")]
 
     for fo_tag, yolo_split in items:
-        print(f"  exporting '{yolo_split}' split...")
+        LOGGER.info(f"  exporting '{yolo_split}' split...")
         split = dataset.match_tags(fo_tag)
         if debug:
             split = split.take(100, seed=51)
@@ -269,14 +245,46 @@ def register_in_wandb(
 
         logged = run.log_artifact(artifact)
         logged.wait()
-        print(f"  artifact '{wandb_collection}' uploaded to project '{wandb_entity}/dataset-registry'")
+        LOGGER.info(f"  artifact '{wandb_collection}' uploaded to project '{wandb_entity}/dataset-registry'")
 
         if wandb_org:
             run.link_artifact(
                 logged,
                 target_path=f"{wandb_org}/wandb-registry-dataset/{wandb_collection}",
             )
-            print(f"  artifact linked to registry collection '{wandb_org}/{wandb_collection}'")
+            LOGGER.info(f"  artifact linked to registry collection '{wandb_org}/{wandb_collection}'")
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ExportConfig:
+    dataset_name: str
+    export_dir: str
+    class_map_path: str
+    description: str = ""
+    split_mode: Literal["split", "train", "val"] = "split"
+    split_by: str = "trip"
+    noise_ratio: float | None = None
+    val_ratio: float = 0.2
+    use_16bit: bool = False
+    label_field: str = "ground_truth_det"
+    register_wandb: bool = False
+    wandb_entity: str | None = None
+    wandb_collection: str | None = None
+    wandb_org: str | None = None
+    tags_suffix: str = "v0"
+    fo_tags: list[str] | None = None
+    seed: int = 42
+    debug: bool = False
+
+    def __post_init__(self) -> None:
+        valid_modes = {"split", "train", "val"}
+        if self.split_mode not in valid_modes:
+            raise ValueError(f"split_mode must be one of {valid_modes}, got '{self.split_mode}'")
 
 
 # ---------------------------------------------------------------------------
@@ -284,108 +292,78 @@ def register_in_wandb(
 # ---------------------------------------------------------------------------
 
 
-def export_dataset(
-    dataset_name: str,
-    export_dir: str,
-    class_map_path: str,
-    description: str = "",
-    split_mode: str = "split",
-    split_by: str = "trip",
-    noise_ratio: float | None = None,
-    val_ratio: float = 0.2,
-    use_16bit: bool = False,
-    label_field: str = "ground_truth_det",
-    register_wandb: bool = False,
-    wandb_entity: str | None = None,
-    wandb_collection: str | None = None,
-    wandb_org: str | None = None,
-    tags_suffix: str = "v0",
-    fo_tags: list[str] | None = None,
-    seed: int = 42,
-    debug: bool = False,
-) -> None:
-    if register_wandb and not wandb_entity:
+def export_dataset(cfg: ExportConfig) -> None:
+    if cfg.register_wandb and not cfg.wandb_entity:
         raise ValueError("--wandb-entity is required when --wandb is set")
-    wandb_collection = wandb_collection or dataset_name
+    wandb_collection = cfg.wandb_collection or cfg.dataset_name
 
-    # Clean up stale tmp datasets from previous interrupted runs
-    for d in fo.list_datasets():
-        if d.startswith("tmp_"):
-            fo.delete_dataset(d)
-
-    folder_name = f"{dataset_name}_{tags_suffix}"
-    out_dir = Path(export_dir) / folder_name
+    folder_name = f"{cfg.dataset_name}_{cfg.tags_suffix}"
+    out_dir = Path(cfg.export_dir) / folder_name
     shutil.rmtree(out_dir, ignore_errors=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # --- Load ---
-    print(f"[1/6] Loading dataset '{dataset_name}'...")
-    dataset = load_dataset(dataset_name, fo_tags)
-    print(f"  {len(dataset)} samples" + (f" (filtered by tags {fo_tags})" if fo_tags else ""))
+    LOGGER.info(f"[1/6] Loading dataset '{cfg.dataset_name}'...")
+    dataset = load_dataset(cfg.dataset_name, cfg.fo_tags)
+    LOGGER.info(f"  {len(dataset)} samples" + (f" (filtered by tags {cfg.fo_tags})" if cfg.fo_tags else ""))
 
     # --- Uniqueness ---
-    if noise_ratio is not None:
+    if cfg.noise_ratio is not None:
         if not dataset.has_field("uniqueness"):
-            print("[2/6] Computing uniqueness (first time only)...")
+            LOGGER.info("[2/6] Computing uniqueness (first time only)...")
             fob.compute_uniqueness(dataset)
         else:
-            print("[2/6] Uniqueness already computed, skipping.")
+            LOGGER.info("[2/6] Uniqueness already computed, skipping.")
     else:
-        print("[2/6] Skipping uniqueness (no subsampling requested).")
+        LOGGER.info("[2/6] Skipping uniqueness (no subsampling requested).")
 
     # --- Subsample ---
-    if noise_ratio is not None:
-        print(f"[3/6] Subsampling (noise_ratio={noise_ratio})...")
-        subset = subsample_dataset(dataset, noise_ratio, label_field, seed)
-        print(f"  {len(subset)} samples after subsampling")
+    if cfg.noise_ratio is not None:
+        LOGGER.info(f"[3/6] Subsampling (noise_ratio={cfg.noise_ratio})...")
+        subset = subsample_dataset(dataset, cfg.noise_ratio, cfg.label_field)
+        LOGGER.info(f"  {len(subset)} samples after subsampling")
     else:
-        print("[3/6] Skipping subsampling (using all samples).")
+        LOGGER.info("[3/6] Skipping subsampling (using all samples).")
         subset = dataset
 
     # --- Split ---
-    print(f"[4/6] Tagging splits (split_mode='{split_mode}')...")
-    if split_mode == "split":
+    LOGGER.info(f"[4/6] Tagging splits (split_mode='{cfg.split_mode}')...")
+    if cfg.split_mode == "split":
         existing_tags = set(subset.count_values("tags").keys())
-        train_tag, val_tag = f"TRAIN_{tags_suffix}", f"VAL_{tags_suffix}"
+        train_tag, val_tag = f"TRAIN_{cfg.tags_suffix}", f"VAL_{cfg.tags_suffix}"
         if train_tag in existing_tags and val_tag in existing_tags:
             n_train = len(subset.match_tags(train_tag))
             n_val = len(subset.match_tags(val_tag))
             total = n_train + n_val
-            print(f"  using existing split tags '{train_tag}' / '{val_tag}'")
-            print(f"  train/val split: {n_train/total:.2f} / {n_val/total:.2f}")
-        elif split_by == "random":
-            subset = split_random(subset, val_ratio, tags_suffix, seed)
+            LOGGER.info(f"  using existing split tags '{train_tag}' / '{val_tag}'")
+            LOGGER.info(f"  train/val split: {n_train/total:.2f} / {n_val/total:.2f}")
+        elif cfg.split_by == "random":
+            subset = split_random(subset, cfg.val_ratio, cfg.tags_suffix, cfg.seed)
         else:
-            subset = split_by_field(subset, split_by, val_ratio, tags_suffix)
+            subset = split_by_field(subset, cfg.split_by, cfg.val_ratio, cfg.tags_suffix)
     else:
-        tag = f"TRAIN_{tags_suffix}" if split_mode == "train" else f"VAL_{tags_suffix}"
+        tag = f"TRAIN_{cfg.tags_suffix}" if cfg.split_mode == "train" else f"VAL_{cfg.tags_suffix}"
         subset.untag_samples(tag)
         subset.tag_samples(tag)
-        print(f"  all {len(subset)} samples tagged as '{split_mode}'")
-
-    # Clone to a tmp dataset so we can mutate it (filepath swap, label filter)
-    # without touching the original.
-    tmp_name = f"tmp_{dataset_name}"
-    try:
-        export = subset.clone(tmp_name)
-    except ValueError:
-        print(f"  tmp dataset '{tmp_name}' already exists, reusing it")
-        export = fo.load_dataset(tmp_name)
+        LOGGER.info(f"  all {len(subset)} samples tagged as '{cfg.split_mode}'")
 
     # --- Category map ---
-    print("[5/6] Applying category map...")
-    class_map = read_yaml(class_map_path)
-    export = apply_category_map(export, class_map, label_field)
+    LOGGER.info("[5/6] Applying category map...")
+    class_map = yaml.safe_load(Path(cfg.class_map_path).read_text(encoding="utf-8"))
+    export = apply_category_map(subset, class_map, cfg.label_field)
 
-    classes = export.distinct(f"{label_field}.detections.label")
+    classes = export.distinct(f"{cfg.label_field}.detections.label")
     missing = set(class_map.values()) - set(classes) - {"None"}
     if missing:
-        print(f"  WARNING: the following mapped classes have no samples: {missing}")
-    print(f"  classes: {classes}")
+        LOGGER.warning(f"  the following mapped classes have no samples: {missing}")
+    LOGGER.info(f"  classes: {classes}")
 
     # --- 16-bit filepath swap ---
-    if use_16bit:
-        print("  switching filepaths to 16-bit PNG...")
+    # set_values mutates a dataset, so we clone into a tmp dataset only when needed.
+    tmp_name = f"tmp_{cfg.dataset_name}"
+    if cfg.use_16bit:
+        LOGGER.info("  switching filepaths to 16-bit PNG...")
+        export = export.clone(tmp_name)
         filepaths = [
             fp.replace("8Bit", "16Bit").replace("jpg", "png")
             for fp in export.values("filepath")
@@ -393,70 +371,71 @@ def export_dataset(
         export.set_values("filepath", filepaths)
 
     # --- Export ---
-    print("[6/6] Exporting to YOLO format...")
-    export_splits(export, tags_suffix, export_dir, folder_name, label_field, classes, split_mode, debug)
+    LOGGER.info("[6/6] Exporting to YOLO format...")
+    export_splits(export, cfg.tags_suffix, cfg.export_dir, folder_name, cfg.label_field, classes, cfg.split_mode, cfg.debug)
 
     # --- Validate ---
-    print("  validating export...")
-    if split_mode in ("split", "train"):
+    LOGGER.info("  validating export...")
+    if cfg.split_mode in ("split", "train"):
         validate_split(out_dir, "train")
-    if split_mode in ("split", "val"):
+    if cfg.split_mode in ("split", "val"):
         validate_split(out_dir, "val")
 
     # --- Label distribution plot ---
     counts_by_split: dict[str, dict] = {}
-    if split_mode in ("split", "train"):
-        counts_by_split["train"] = export.match_tags(f"TRAIN_{tags_suffix}").count_values(
-            f"{label_field}.detections.label"
+    if cfg.split_mode in ("split", "train"):
+        counts_by_split["train"] = export.match_tags(f"TRAIN_{cfg.tags_suffix}").count_values(
+            f"{cfg.label_field}.detections.label"
         )
-    if split_mode in ("split", "val"):
-        counts_by_split["val"] = export.match_tags(f"VAL_{tags_suffix}").count_values(
-            f"{label_field}.detections.label"
+    if cfg.split_mode in ("split", "val"):
+        counts_by_split["val"] = export.match_tags(f"VAL_{cfg.tags_suffix}").count_values(
+            f"{cfg.label_field}.detections.label"
         )
     plot_path = str(out_dir / "label_distribution.png")
     fig = plot_label_distribution(counts_by_split, plot_path)
     plt.close(fig)
-    print(f"  label distribution saved → {plot_path}")
+    LOGGER.info(f"  label distribution saved → {plot_path}")
 
     # --- Class map YAML ---
     class_map_yaml = out_dir / "class_map.yaml"
     with open(class_map_yaml, "w", encoding="utf-8") as f:
         yaml.safe_dump(class_map, f, default_flow_style=False, allow_unicode=True)
-    print(f"  class map saved → {class_map_yaml}")
+    LOGGER.info(f"  class map saved → {class_map_yaml}")
 
     # --- Description ---
-    if description:
+    if cfg.description:
         desc_path = out_dir / "description.txt"
-        desc_path.write_text(description)
-        print(f"  description saved → {desc_path}")
+        desc_path.write_text(cfg.description)
+        LOGGER.info(f"  description saved → {desc_path}")
 
     # --- W&B registration ---
-    if register_wandb:
-        print("Registering in Weights & Biases...")
+    if cfg.register_wandb:
+        LOGGER.info("Registering in Weights & Biases...")
         params = {
-            "description": description,
-            "dataset_name": dataset_name,
-            "split_mode": split_mode,
-            "split_by": split_by if split_mode == "split" else None,
-            "noise_ratio": noise_ratio,
-            "val_ratio": val_ratio if split_mode == "split" else None,
-            "use_16bit": use_16bit,
-            "label_field": label_field,
-            "fo_tags": fo_tags,
-            "tags_suffix": tags_suffix,
-            "seed": seed,
+            "description": cfg.description,
+            "dataset_name": cfg.dataset_name,
+            "split_mode": cfg.split_mode,
+            "split_by": cfg.split_by if cfg.split_mode == "split" else None,
+            "noise_ratio": cfg.noise_ratio,
+            "val_ratio": cfg.val_ratio if cfg.split_mode == "split" else None,
+            "use_16bit": cfg.use_16bit,
+            "label_field": cfg.label_field,
+            "fo_tags": cfg.fo_tags,
+            "tags_suffix": cfg.tags_suffix,
+            "seed": cfg.seed,
         }
         register_in_wandb(
-            export_dir=export_dir,
+            export_dir=cfg.export_dir,
             dataset_name=folder_name,
             params=params,
-            wandb_entity=wandb_entity,
+            wandb_entity=cfg.wandb_entity,
             wandb_collection=wandb_collection,
-            wandb_org=wandb_org,
+            wandb_org=cfg.wandb_org,
         )
 
-    fo.delete_dataset(tmp_name)
-    print(f"\nDone. Dataset exported to: {out_dir}")
+    if cfg.use_16bit:
+        fo.delete_dataset(tmp_name)
+    LOGGER.info(f"\nDone. Dataset exported to: {out_dir}")
 
 
 # ---------------------------------------------------------------------------
@@ -523,11 +502,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    args.description = input("Dataset description (required): ").strip()
-    if not args.description:
-        print("Error: a description is required. Aborting.")
+    description = input("Dataset description (required): ").strip()
+    if not description:
+        LOGGER.error("Error: a description is required. Aborting.")
         return
-    export_dataset(**vars(args))
+    export_dataset(ExportConfig(**vars(args), description=description))
 
 
 if __name__ == "__main__":

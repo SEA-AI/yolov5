@@ -37,10 +37,10 @@ dataset = dataset.map_labels("ground_truth_train_det", class_map)
 
 ### Export dataset
 
-Use `docs/fo_to_yolo.py` to export a FiftyOne dataset to YOLOv5 format with optional W&B registration.
+Use `scripts/fo_to_yolo.py` to export a FiftyOne dataset to YOLOv5 format with optional W&B registration.
 
 ```bash
-python docs/fo_to_yolo.py \
+python scripts/fo_to_yolo.py \
   --dataset-name "MY_DATASET" \
   --export-dir "/home/sea-ai/Documents" \
   --class-map "data/class_map.yaml" \
@@ -60,19 +60,19 @@ python docs/fo_to_yolo.py \
 
 ### Combine datasets
 
-Use `docs/combine_datasets.py` to merge multiple exported datasets into a single self-contained dataset for training. All source datasets must share the same class list.
+Use `scripts/combine_datasets.py` to merge multiple exported datasets into a single self-contained dataset for training. All source datasets must share the same class list.
 
 Each entry in `--datasets` can be a local path or a W&B artifact reference — they can be mixed freely.
 
 ```bash
 # Local paths
-python docs/combine_datasets.py \
+python scripts/combine_datasets.py \
   --datasets "/home/sea-ai/Documents/DATASET_A_v0" "/home/sea-ai/Documents/DATASET_B_v0" \
   --output-dir "/home/sea-ai/Documents/COMBINED_v0" \
   --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
 
 # W&B artifact refs — no local setup needed, downloaded automatically
-python docs/combine_datasets.py \
+python scripts/combine_datasets.py \
   --datasets "sea-ai/dataset-registry/DATASET_A:v0" "sea-ai/dataset-registry/DATASET_B:v0" \
   --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
 ```

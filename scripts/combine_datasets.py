@@ -41,17 +41,14 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from utils.dataset_utils import validate_split
+
 import yaml
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def read_yaml(path: Path) -> dict:
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 def is_wandb_ref(entry: str) -> bool:
@@ -87,28 +84,6 @@ def download_artifact(ref: str, download_dir: str) -> str:
     artifact.download(root=dest)
     return dest
 
-
-def validate_split(out_dir: Path, split: str) -> None:
-    """Raise if a split directory is missing, empty, or has mismatched image/label counts."""
-    img_dir = out_dir / "images" / split
-    lbl_dir = out_dir / "labels" / split
-
-    if not img_dir.exists() or not lbl_dir.exists():
-        raise FileNotFoundError(f"Missing directory for split '{split}': expected {img_dir} and {lbl_dir}")
-
-    image_exts = {".jpg", ".jpeg", ".png"}
-    n_images = sum(1 for f in img_dir.iterdir() if f.suffix.lower() in image_exts)
-    n_labels = sum(1 for f in lbl_dir.iterdir() if f.suffix == ".txt")
-
-    if n_images == 0:
-        raise ValueError(f"No images found in '{img_dir}'")
-    if n_labels == 0:
-        raise ValueError(f"No label files found in '{lbl_dir}'")
-    if n_images != n_labels:
-        raise ValueError(
-            f"Image/label count mismatch in split '{split}': {n_images} images vs {n_labels} labels"
-        )
-    print(f"  {split}: {n_images} images, {n_labels} labels — OK")
 
 
 def copy_split(
@@ -265,7 +240,7 @@ def combine_datasets(
         yaml_path = Path(d) / "dataset.yaml"
         if not yaml_path.exists():
             raise FileNotFoundError(f"dataset.yaml not found in '{d}'")
-        yamls.append((Path(d), read_yaml(yaml_path)))
+        yamls.append((Path(d), yaml.safe_load(yaml_path.read_text(encoding="utf-8"))))
         print(f"  loaded {yaml_path}")
 
     classes = validate_classes(yamls)
