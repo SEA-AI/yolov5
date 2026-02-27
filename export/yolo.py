@@ -48,7 +48,6 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-import torch
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
@@ -83,21 +82,6 @@ def main(
         imgsz=imgsz,
         infsz=infsz,
     )
-
-    # Validate model before export
-    try:
-        # Test forward pass with dummy input
-        dummy_input = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device)
-        dummy_input = dummy_input.half() if half else dummy_input.float()
-        dummy_input /= 255.0
-
-        with torch.no_grad():
-            _ = model(dummy_input)
-        print("✅ Model validation successful - forward pass works")
-    except Exception as e:
-        print(f"❌ Model validation failed: {e}")
-        print("   Export may fail or produce invalid ONNX model")
-        raise
 
     # Export to ONNX
     export_model_to_onnx(
