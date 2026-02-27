@@ -396,7 +396,7 @@ class YOLO(nn.Module):
         """Run all models on input and merge their detections into one tensor."""
         preds = [m(x, profile, visualize) for m in self._det_models]
         det_tensors = [p[0] if isinstance(p, tuple) else p for p in preds]
-        return (self._merge_detections(det_tensors),)
+        return (det_tensors[0],) if len(det_tensors) == 1 else (self._merge_detections(det_tensors),)
 
     def _merge_detections(self, det_tensors: List[torch.Tensor]) -> torch.Tensor:
         """Merge all models' detections into one tensor (shared class indices)."""
