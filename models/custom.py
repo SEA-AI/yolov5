@@ -22,12 +22,12 @@ class OBBModel(UBaseModel):
     def __init__(
         self,
         weights: str = "yolov11n-obb.pt",
-        device: Union[str, torch.device] = None,  # automatically select device
+        device: Union[str, torch.device] = "",  # automatically select device
         fp16: bool = False,
         fuse: bool = False,
     ):
         super().__init__()
-        self.device = select_device(device)
+        self.device = select_device(str(device))
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
@@ -84,7 +84,7 @@ class HorizonModel(BaseModel):
         weights: str = "yolov5n.pt",
         nc_pitch: int = 500,
         nc_theta: int = 500,
-        device: Union[str, torch.device] = None,  # automatically select device
+        device: Union[str, torch.device] = "",  # automatically select device
         cutoff: int = None,
         fp16: bool = False,
         fuse: bool = False,  # false for training, true for inference
@@ -109,7 +109,7 @@ class HorizonModel(BaseModel):
 
         self.nc_pitch = nc_pitch
         self.nc_theta = nc_theta
-        self.device = select_device(device)
+        self.device = select_device(str(device))
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
@@ -307,12 +307,12 @@ class ObjectsModel(BaseModel):
     def __init__(
         self,
         weights: str = "yolov5n.pt",
-        device: Union[str, torch.device] = None,  # automatically select device
+        device: Union[str, torch.device] = "",  # automatically select device
         fp16: bool = False,
         fuse: bool = False,
     ):
         super().__init__()
-        self.device = select_device(device)
+        self.device = select_device(str(device))
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
@@ -349,7 +349,7 @@ class YOLO(nn.Module):
     """YOLO model: one or more detection weights, same input, single output.
 
     - One weight: single detection model with preprocessing/postprocessing hooks.
-    - Two or more weights: ensemble (same input to all, fused output with merged class space).
+    - Two or more weights: ensemble (same input to all, merged output with shared class space).
     """
 
     BBOX_CONF_COLS = 5  # x1, y1, x2, y2, confidence
@@ -357,13 +357,13 @@ class YOLO(nn.Module):
     def __init__(
         self,
         weights: Union[str, Sequence[str]],
-        device: Optional[Union[str, torch.device]] = None,
+        device: Union[str, torch.device] = "",
         fp16: bool = False,
         fuse: bool = True,
         imgsz: Tuple[int, int] = (640, 640),
         infsz: Optional[Tuple[int, int]] = None,
     ):
-        """Initialize YOLO. Pass one path for single model, N paths for ensemble (fused output)."""
+        """Initialize YOLO. Pass one path for single model, N paths for ensemble (merged output)."""
         super().__init__()
         weights_list = [weights] if isinstance(weights, str) else list(weights)
         if not weights_list:
@@ -380,13 +380,11 @@ class YOLO(nn.Module):
         self.hooks = {}
         self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
 
-        if len(self._det_models) == 1:
-            self.names = self._det_models[0].names
-            self._model_to_merged_maps = None
-        else:
-            names_list: List[Dict[int, str]] = [m.names for m in self._det_models]
-            self.names, self._model_to_merged_maps = _build_merged_names_and_mappings(names_list)
-            LOGGER.info(f"YOLO ensemble: {len(self._det_models)} models, merged classes={list(self.names.values())}")
+        models_classes: List[Dict[int, str]] = [m.names for m in self._det_models]
+        shared_classes, self._merge_mappings = _merge_class_names(models_classes)
+        self.names = dict(enumerate(shared_classes))  # index → name for compatibility
+        if len(self._det_models) > 1:
+            LOGGER.info(f"YOLO ensemble: {len(self._det_models)} models, merged classes={shared_classes}")
 
         self.obj_det_weights = self._weights_list[0]  # backward compat (e.g. export.py)
         LOGGER.debug(
@@ -395,35 +393,30 @@ class YOLO(nn.Module):
         )
 
     def forward(self, x, profile=False, visualize=False):
-        """Forward: single model returns its output; ensemble returns fused detections."""
-        if len(self._det_models) == 1:
-            return self._det_models[0](x, profile, visualize)
+        """Run all models on input and merge their detections into one tensor."""
         preds = [m(x, profile, visualize) for m in self._det_models]
         det_tensors = [p[0] if isinstance(p, tuple) else p for p in preds]
-        return (self._fuse_detections(det_tensors),)
+        return (self._merge_detections(det_tensors),)
 
-    def _fuse_detections(self, det_tensors: List[torch.Tensor]) -> torch.Tensor:
-        """Merge per-model detection tensors into one tensor in merged class space."""
-        if self._model_to_merged_maps is None:
-            return det_tensors[0]
-
+    def _merge_detections(self, det_tensors: List[torch.Tensor]) -> torch.Tensor:
+        """Merge all models' detections into one tensor (shared class indices)."""
         bbox_conf = self.BBOX_CONF_COLS
         batch_size = det_tensors[0].shape[0]
         total_dets = sum(d.shape[1] for d in det_tensors)
         total_cols = bbox_conf + len(self.names)
-        output = torch.zeros(
+        merged = torch.zeros(
             (batch_size, total_dets, total_cols),
             device=det_tensors[0].device,
             dtype=det_tensors[0].dtype,
         )
         offset = 0
-        for dets, model_map in zip(det_tensors, self._model_to_merged_maps):
+        for dets, mapping in zip(det_tensors, self._merge_mappings):
             n = dets.shape[1]
-            output[:, offset : offset + n, :bbox_conf] = dets[:, :, :bbox_conf]
-            for model_idx, merged_idx in model_map.items():
-                output[:, offset : offset + n, bbox_conf + merged_idx] = dets[:, :, bbox_conf + model_idx]
+            merged[:, offset : offset + n, :bbox_conf] = dets[:, :, :bbox_conf]
+            for local_idx, shared_idx in mapping.items():
+                merged[:, offset : offset + n, bbox_conf + shared_idx] = dets[:, :, bbox_conf + local_idx]
             offset += n
-        return output
+        return merged
 
     def register_preprocessing_hook(self):
         """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
@@ -523,14 +516,11 @@ class YOLO(nn.Module):
         return tuple(_preprocess(inp) for inp in inputs)
 
     @staticmethod
-    def _postprocessing_hook(module, _inputs, outputs):
+    def _postprocessing_hook(module, _inputs, detections):
         """Convert outputs to float (if needed) and scale back boxes if transform was applied."""
 
         def _to_float(x):
             return x.float() if module.fp16 else x
-
-        # outputs is the detection tuple from forward method
-        detections = outputs
 
         # Scale back boxes if transform was applied
         if module.ratio_pad is not None:
@@ -576,7 +566,7 @@ class AHOY(YOLO):
         self,
         obj_det_weights: str,
         hor_det_weights: str,
-        device: Optional[Union[str, torch.device]] = None,  # automatically select device
+        device: Union[str, torch.device] = "",  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
         imgsz: Tuple[int, int] = (640, 640),
@@ -801,37 +791,24 @@ def _get_classification_heads(model, cutoff, nc_pitch, nc_theta):
     return c_pitch, c_theta
 
 
-def _build_merged_names_and_mappings(
-    model_names_list: Sequence[Dict[int, str]],
-) -> Tuple[Dict[int, str], List[Dict[int, int]]]:
-    """Build merged class names and per-model index mappings.
-
-    Processes models in order. For each class name: if it already exists in the
-    merged set (case-insensitive), the model's class maps to that index;
-    otherwise the class is appended and the model maps to the new index.
-
-    Returns:
-        merged_names: dict merged_idx -> class_name
-        model_to_merged_maps: list of dicts, one per model: model_class_idx -> merged_idx
+def _merge_class_names(
+    models_classes: Sequence[Dict[int, str]],
+) -> Tuple[List[str], List[Dict[int, int]]]:
     """
-    merged_names: Dict[int, str] = {}
-    model_to_merged_maps: List[Dict[int, int]] = []
+    Merge per-model class name dicts into one shared list, deduplicating case-insensitively.
+    Returns the shared class list and, per model, a mapping of local → shared index.
+    """
+    shared: List[str] = []
+    seen: Dict[str, int] = {}  # lowercase name → shared index
+    mappings: List[Dict[int, int]] = []
 
-    for names in model_names_list:
-        model_map: Dict[int, int] = {}
-        for model_idx, name in names.items():
-            name_lower = name.lower()
-            found = None
-            for merged_idx, merged_name in merged_names.items():
-                if merged_name.lower() == name_lower:
-                    found = merged_idx
-                    break
-            if found is not None:
-                model_map[model_idx] = found
-            else:
-                new_idx = len(merged_names)
-                merged_names[new_idx] = name
-                model_map[model_idx] = new_idx
-        model_to_merged_maps.append(model_map)
+    for local_names in models_classes:
+        mapping: Dict[int, int] = {}
+        for local_idx, name in local_names.items():
+            if name.lower() not in seen:
+                seen[name.lower()] = len(shared)
+                shared.append(name)
+            mapping[local_idx] = seen[name.lower()]
+        mappings.append(mapping)
 
-    return merged_names, model_to_merged_maps
+    return shared, mappings
