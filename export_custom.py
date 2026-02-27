@@ -31,11 +31,6 @@ from export import export_onnx, export_onnx_trt7_compatible
 from utils.general import LOGGER
 
 
-# -----------------------------------------------------------------------------
-# Shared export utility
-# -----------------------------------------------------------------------------
-
-
 def export_model_to_onnx(
     model,
     imgsz: Tuple[int, int],
@@ -89,11 +84,6 @@ def export_model_to_onnx(
     return result
 
 
-# -----------------------------------------------------------------------------
-# Export entrypoint
-# -----------------------------------------------------------------------------
-
-
 def main(
     det_weights: List[str],
     imgsz: int | Tuple[int, int],
@@ -141,11 +131,6 @@ def main(
     )
 
 
-# -----------------------------------------------------------------------------
-# CLI
-# -----------------------------------------------------------------------------
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -157,7 +142,10 @@ def _parse_args() -> argparse.Namespace:
         nargs="+",
         required=True,
         metavar="WEIGHTS",
-        help="Detection weights: path(s) or W&B artifact (e.g. entity/project/run:v0). One = single model; two+ = ensemble. Same for YOLO and AHOY.",
+        help=(
+            "Detection weights: path(s) or W&B artifact (e.g. entity/project/run:v0). "
+            "One = single model; two+ = ensemble object detection model."
+        ),
     )
     parser.add_argument(
         "-hw",
