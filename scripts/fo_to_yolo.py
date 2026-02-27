@@ -23,8 +23,9 @@ python fo_to_yolo.py \\
   --label-field ground_truth_det \\
   --use-16bit \\
   --wandb --wandb-entity sea-ai --wandb-org sea-ai-org --wandb-collection my-collection \\  # omit --wandb to skip upload entirely
-                                                                                          # omit --wandb-org to upload artifact but skip registry linking (it will not great a dataset in the registry, but the artifact will still be available in the project and can be linked manually later)
+                                                                                          # omit --wandb-org to upload artifact but skip registry linking (it will not create a dataset in the registry, but the artifact will still be available in the project and can be linked manually later)
                                                                                           # omit --wandb-collection to use --dataset-name as the artifact name
+                                                                                          # W&B versions artifacts by content hash: a new version is only created when the exported files differ from the previous upload
   --tags-suffix v0 \\   #dataset version suffix for the TRAIN_/VAL_ tags (e.g. v0, v1, etc.); only relevant if --split-mode is split
   --fo-tags tag_one tag_two \\   # optional pre-filtering by FiftyOne sample tags; omit to use all samples in the dataset
   --seed 42
@@ -248,11 +249,20 @@ def register_in_wandb(
         LOGGER.info(f"  artifact '{wandb_collection}' uploaded to project '{wandb_entity}/dataset-registry'")
 
         if wandb_org:
-            run.link_artifact(
-                logged,
-                target_path=f"{wandb_org}/wandb-registry-dataset/{wandb_collection}",
-            )
-            LOGGER.info(f"  artifact linked to registry collection '{wandb_org}/{wandb_collection}'")
+            try:
+                run.link_artifact(
+                    logged,
+                    target_path=f"{wandb_org}/wandb-registry-dataset/{wandb_collection}",
+                )
+                LOGGER.info(f"  artifact linked to registry collection '{wandb_org}/{wandb_collection}'")
+            except wandb.errors.CommError as e:
+                if "Duplicate entry" in str(e):
+                    LOGGER.warning(
+                        f"  artifact version already linked to registry collection '{wandb_org}/{wandb_collection}' "
+                        f"(content unchanged since last upload — no new version created)"
+                    )
+                else:
+                    raise
 
 
 # ---------------------------------------------------------------------------

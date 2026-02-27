@@ -33,6 +33,7 @@ python combine_datasets.py \\
   # --output-dir "/mnt/datasets/COMBINED"  → where the combined dataset is written (default: temp dir)
   # --download-dir "/mnt/datasets"  → where W&B artifacts are downloaded (default: temp dir)
   # --wandb-org sea-ai-org  → also links to the Dataset Registry
+  # W&B versions artifacts by content hash: a new version is only created when the combined files differ from the previous upload
   # A description will be prompted interactively and is required to proceed.
 """
 
@@ -184,11 +185,20 @@ def register_in_wandb(
         print(f"  artifact '{wandb_collection}' uploaded to '{wandb_entity}/dataset-registry'")
 
         if wandb_org:
-            run.link_artifact(
-                logged,
-                target_path=f"{wandb_org}/wandb-registry-dataset/{wandb_collection}",
-            )
-            print(f"  artifact linked to registry '{wandb_org}/{wandb_collection}'")
+            try:
+                run.link_artifact(
+                    logged,
+                    target_path=f"{wandb_org}/wandb-registry-dataset/{wandb_collection}",
+                )
+                print(f"  artifact linked to registry '{wandb_org}/{wandb_collection}'")
+            except wandb.errors.CommError as e:
+                if "Duplicate entry" in str(e):
+                    print(
+                        f"  artifact version already linked to registry '{wandb_org}/{wandb_collection}' "
+                        f"(content unchanged since last upload — no new version created)"
+                    )
+                else:
+                    raise
 
 
 # ---------------------------------------------------------------------------
