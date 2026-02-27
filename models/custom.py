@@ -346,69 +346,84 @@ class ObjectsModel(BaseModel):
 
 
 class YOLO(nn.Module):
-    """YOLO model with preprocessing and postprocessing hooks.
+    """YOLO model: one or more detection weights, same input, single output.
 
-    Single object-detection model with:
-    - Automatic preprocessing (normalization, optional resizing/padding)
-    - Postprocessing hooks (type conversion, box scaling)
-    - Export preparation
+    - One weight: single detection model with preprocessing/postprocessing hooks.
+    - Two or more weights: ensemble (same input to all, fused output with merged class space).
     """
+
+    BBOX_CONF_COLS = 5  # x1, y1, x2, y2, confidence
 
     def __init__(
         self,
-        obj_det_weights: str,
-        device: Optional[Union[str, torch.device]] = None,  # automatically select device
+        weights: Union[str, Sequence[str]],
+        device: Optional[Union[str, torch.device]] = None,
         fp16: bool = False,
-        fuse: bool = True,  # fuse conv and bn layers
+        fuse: bool = True,
         imgsz: Tuple[int, int] = (640, 640),
         infsz: Optional[Tuple[int, int]] = None,
     ):
-        """Initialize YOLO model.
-
-        Args:
-            obj_det_weights: Path to model weights file
-            device: Device to run model on (automatically selected if None)
-            fp16: Use half precision (fp16)
-            fuse: Fuse conv and batch norm layers
-            imgsz: Input image size (height, width)
-            infsz: Inference size (height, width). If different from imgsz,
-                   the model will apply resize/padding transformations
-        """
+        """Initialize YOLO. Pass one path for single model, N paths for ensemble (fused output)."""
         super().__init__()
-        self.obj_det_weights = obj_det_weights
-        self.obj_det = self.load_obj_det(self.obj_det_weights, device=device, fp16=fp16, fuse=fuse)
+        weights_list = [weights] if isinstance(weights, str) else list(weights)
+        if not weights_list:
+            raise ValueError("weights must be at least one path")
+        self._weights_list = weights_list
+        self._det_models = [ObjectsModel(w, device=device, fp16=fp16, fuse=fuse) for w in weights_list]
+        # First model drives device, stride, and preprocessing
+        self.obj_det = self._det_models[0]
         self.device = self.obj_det.device
         self.fp16 = fp16
         self.stride = self.obj_det.stride
-        self.names = self.obj_det.names
         self.imgsz = imgsz
         self.infsz = infsz if infsz is not None else imgsz
-
-        # keep track of hooks
         self.hooks = {}
-
-        # Scaling in Padding Preprocessing
         self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
 
+        if len(self._det_models) == 1:
+            self.names = self._det_models[0].names
+            self._model_to_merged_maps = None
+        else:
+            names_list: List[Dict[int, str]] = [m.names for m in self._det_models]
+            self.names, self._model_to_merged_maps = _build_merged_names_and_mappings(names_list)
+            LOGGER.info(f"YOLO ensemble: {len(self._det_models)} models, merged classes={list(self.names.values())}")
+
+        self.obj_det_weights = self._weights_list[0]  # backward compat (e.g. export.py)
         LOGGER.debug(
-            f"YOLO model info: "
-            f"model.type={type(self.obj_det.model).__name__}, "
-            f"save={self.obj_det.save}, "
-            f"stride={self.obj_det.stride}"
+            f"YOLO model info: model.type={type(self.obj_det.model).__name__}, "
+            f"save={self.obj_det.save}, stride={self.obj_det.stride}"
         )
 
-    def load_obj_det(
-        self, weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
-    ):
-        """Load object detection model."""
-        return ObjectsModel(weights, device=device, fp16=fp16, fuse=fuse)
-
     def forward(self, x, profile=False, visualize=False):
-        """Forward pass through model.
+        """Forward: single model returns its output; ensemble returns fused detections."""
+        if len(self._det_models) == 1:
+            return self._det_models[0](x, profile, visualize)
+        preds = [m(x, profile, visualize) for m in self._det_models]
+        det_tensors = [p[0] if isinstance(p, tuple) else p for p in preds]
+        return (self._fuse_detections(det_tensors),)
 
-        Returns detections.
-        """
-        return self.obj_det(x, profile, visualize)
+    def _fuse_detections(self, det_tensors: List[torch.Tensor]) -> torch.Tensor:
+        """Merge per-model detection tensors into one tensor in merged class space."""
+        if self._model_to_merged_maps is None:
+            return det_tensors[0]
+
+        bbox_conf = self.BBOX_CONF_COLS
+        batch_size = det_tensors[0].shape[0]
+        total_dets = sum(d.shape[1] for d in det_tensors)
+        total_cols = bbox_conf + len(self.names)
+        output = torch.zeros(
+            (batch_size, total_dets, total_cols),
+            device=det_tensors[0].device,
+            dtype=det_tensors[0].dtype,
+        )
+        offset = 0
+        for dets, model_map in zip(det_tensors, self._model_to_merged_maps):
+            n = dets.shape[1]
+            output[:, offset : offset + n, :bbox_conf] = dets[:, :, :bbox_conf]
+            for model_idx, merged_idx in model_map.items():
+                output[:, offset : offset + n, bbox_conf + merged_idx] = dets[:, :, bbox_conf + model_idx]
+            offset += n
+        return output
 
     def register_preprocessing_hook(self):
         """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
@@ -508,7 +523,7 @@ class YOLO(nn.Module):
         return tuple(_preprocess(inp) for inp in inputs)
 
     @staticmethod
-    def _postprocessing_hook(module, inputs, outputs):
+    def _postprocessing_hook(module, _inputs, outputs):
         """Convert outputs to float (if needed) and scale back boxes if transform was applied."""
 
         def _to_float(x):
@@ -529,9 +544,10 @@ class YOLO(nn.Module):
         return detections
 
     def prepare_for_export(self, dynamic: bool = False):
-        """Prepare model for export."""
-        LOGGER.info(f"✨ Preparing {self.obj_det.__class__.__name__} for export...")
-        self.obj_det.prepare_for_export(dynamic)
+        """Prepare model(s) for export."""
+        LOGGER.info(f"✨ Preparing {self.__class__.__name__} for export...")
+        for m in self._det_models:
+            m.prepare_for_export(dynamic)
 
 
 class AHOY(YOLO):
@@ -560,7 +576,7 @@ class AHOY(YOLO):
         self,
         obj_det_weights: str,
         hor_det_weights: str,
-        device: Union[str, torch.device] = None,  # automatically select device
+        device: Optional[Union[str, torch.device]] = None,  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
         imgsz: Tuple[int, int] = (640, 640),
@@ -580,7 +596,7 @@ class AHOY(YOLO):
         """
         # Initialize parent YOLO class with object detection weights
         super().__init__(
-            obj_det_weights=obj_det_weights,
+            weights=obj_det_weights,
             device=device,
             fp16=fp16,
             fuse=fuse,
@@ -756,154 +772,6 @@ class DAN(nn.Module):
         self.model_b.register_io_hooks()
 
 
-class Hydra(BaseModel):
-    """
-    Model with two heads: object detection and horizon detection.
-    HydraModel is a wrapper around YOLOv5 DetectionModel.
-    In Greek mythology, Hydra is a serpent-like monster with many heads.
-    """
-
-    def __init__(
-        self,
-        weights: str = "yolov5n.pt",
-        nc_pitch: int = 500,
-        nc_theta: int = 500,
-        device: Union[str, torch.device] = None,  # automatically select device
-        cutoff: int = None,
-        fp16: bool = False,
-        task: str = "both",  # "detection", "horizon", "both"
-    ):
-        """
-        NOTE: Not tested!!!
-        Multi-task model with object detection and horizon detection.
-        backbone --> neck --> detection heads
-                 └-> classification heads for pitch and theta
-
-        Args:
-            model (DetectionModel): YOLOv5 model
-            nc_pitch (int, optional): number of classes for pitch classification. Defaults to 500.
-            nc_theta (int, optional): number of classes for theta classification. Defaults to 500.
-            device (str, optional): device to run model on. Defaults to ''.
-            cutoff (int, optional): cutoff layer for classification heads.
-                If not specified, the SPPF layer is used as cutoff. Defaults to None.
-            task (str, optional): task to run. Defaults to "both".
-                Possible values: "detection", "horizon", "both"
-        """
-        super().__init__()
-
-        assert weights is not None, "weights must be specified"
-        assert isinstance(nc_pitch, int), "nc_pitch must be an integer"
-        assert isinstance(nc_theta, int), "nc_theta must be an integer"
-        assert isinstance(fp16, bool), "fp16 must be a boolean"
-        assert task in [
-            "detection",
-            "horizon",
-            "both",
-        ], "task must be one of 'detection', 'horizon', 'both'"
-
-        self.nc_pitch = nc_pitch
-        self.nc_theta = nc_theta
-        self.device = select_device(device)
-        self.fp16 = fp16
-        self.task = task
-
-        if Path(weights).is_file() or weights.endswith(".pt"):
-            model = attempt_load(weights, device="cpu", fuse=False)
-            LOGGER.info(f"Loaded weights from {weights}")
-        else:
-            raise ValueError("model must be a path to a .pt file")
-
-        if isinstance(model, DetectionModel):
-            LOGGER.warning("WARNING ⚠️ converting YOLOv5 DetectionModel to HorizonModel")
-            self.cutoff = _find_cutoff(model) if cutoff is None else cutoff
-            self._add_classification_heads(model, self.cutoff)  # inplace modification
-
-        self.model = model.model
-        self.model.to(self.device)
-        if self.fp16:
-            self.model.half()
-        else:
-            self.model.float()
-        self.save = model.save
-        self.stride = model.stride
-        self.nc = model.nc
-
-    def _add_classification_heads(self, model: DetectionModel, cutoff: int):
-        if isinstance(model, DetectMultiBackend):
-            model = model.model  # unwrap DetectMultiBackend
-
-        c_pitch, c_theta = _get_classification_heads(model, cutoff, self.nc_pitch, self.nc_theta)
-        model.save = set(list(model.save + [cutoff]))  # add cutoff to save
-
-        # add classification heads to model
-        model.model.add_module(c_pitch.i, c_pitch)
-        model.model.add_module(c_theta.i, c_theta)
-
-    def _horizon_once(self, x, profile=False, visualize=False):
-        x_pitch, x_theta = None, None
-        y, dt = [], []  # outputs
-        for m in self.model:
-            if isinstance(m.i, int) and m.i > self.cutoff:
-                continue
-            if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-            if profile:
-                self._profile_one_layer(m, x, dt)
-            if m.type == "models.common.Classify" and "pitch" in m.i:
-                x_pitch = m(x)
-            elif m.type == "models.common.Classify" and "theta" in m.i:
-                x_theta = m(x)
-            else:  # object detection flow
-                x = m(x)  # run
-                y.append(x if m.i in self.save else None)  # save output
-                if visualize:
-                    feature_visualization(x, m.type, m.i, save_dir=visualize)
-
-        return (x_pitch, x_theta)
-
-    def _detect_once(self, x, profile=False, visualize=False):
-        y, dt = [], []  # outputs
-        for m in self.model:
-            if m.type == "models.common.Classify":
-                continue
-            if profile:
-                self._profile_one_layer(m, x, dt)
-            if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-            x = m(x)  # run
-            y.append(x if m.i in self.save else None)  # save output
-            if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
-        return x
-
-    def _forward_once(self, x, profile=False, visualize=False):
-        x_pitch, x_theta = None, None
-        y, dt = [], []  # outputs
-        for m in self.model:
-            if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-            if profile:
-                self._profile_one_layer(m, x, dt)
-            if m.type == "models.common.Classify" and "pitch" in m.i:
-                x_pitch = m(x)
-            elif m.type == "models.common.Classify" and "theta" in m.i:
-                x_theta = m(x)
-            else:  # object detection flow
-                x = m(x)  # run
-                y.append(x if m.i in self.save else None)  # save output
-                if visualize:
-                    feature_visualization(x, m.type, m.i, save_dir=visualize)
-
-        return (x, x_pitch, x_theta)
-
-    def forward(self, x, profile=False, visualize=False):
-        if self.task == "detection":
-            return self._detect_once(x, profile, visualize)
-        if self.task == "horizon":
-            return self._horizon_once(x, profile, visualize)
-        return self._forward_once(x, profile, visualize)
-
-
 def _find_cutoff(model):
     """Find cutoff layer for classification heads."""
     for i, m in enumerate(model.model):
@@ -967,85 +835,3 @@ def _build_merged_names_and_mappings(
         model_to_merged_maps.append(model_map)
 
     return merged_names, model_to_merged_maps
-
-
-class YOLOEnsemble(YOLO):
-    """Ensemble of YOLO detection models on the same input with fused outputs.
-
-    Runs an arbitrary number of detection models in parallel on the same input,
-    merges their class names (shared names map to the same output class index),
-    and concatenates detections into a single tensor in merged class space.
-    """
-
-    BBOX_CONF_COLS = 5  # x1, y1, x2, y2, confidence
-
-    def __init__(
-        self,
-        weights_list: Sequence[str],
-        device: Optional[Union[str, torch.device]] = None,
-        fp16: bool = False,
-        fuse: bool = True,
-        imgsz: Tuple[int, int] = (640, 640),
-        infsz: Optional[Tuple[int, int]] = None,
-    ):
-        """Initialize YOLOEnsemble.
-
-        Args:
-            weights_list: Paths to model weights (at least 2). First model drives
-                device, stride, and preprocessing (YOLO).
-            device: Device to run models on (auto if None).
-            fp16: Use half precision.
-            fuse: Fuse conv and batch norm layers.
-            imgsz: Input image size (height, width).
-            infsz: Inference size; if different from imgsz, resize/pad is applied.
-        """
-        if len(weights_list) < 2:
-            raise ValueError("weights_list must contain at least 2 model paths")
-        super().__init__(
-            obj_det_weights=weights_list[0],
-            device=device,
-            fp16=fp16,
-            fuse=fuse,
-            imgsz=imgsz,
-            infsz=infsz,
-        )
-        self._weights_list = list(weights_list)
-        self._det_models = [self.obj_det] + [
-            ObjectsModel(w, device=self.device, fp16=fp16, fuse=fuse) for w in weights_list[1:]
-        ]
-        names_list: List[Dict[int, str]] = [m.names for m in self._det_models]
-        self.names, self._model_to_merged_maps = _build_merged_names_and_mappings(names_list)
-        self._num_merged_classes = len(self.names)
-        LOGGER.info(f"YOLOEnsemble: {len(self._det_models)} models, merged classes={list(self.names.values())}")
-
-    def forward(self, x, profile=False, visualize=False):
-        """Run all models on the same input and return fused detections."""
-        preds = [m(x, profile, visualize) for m in self._det_models]
-        det_tensors = [p[0] if isinstance(p, tuple) else p for p in preds]
-        return (self._fuse_detections(det_tensors),)
-
-    def _fuse_detections(self, det_tensors: List[torch.Tensor]) -> torch.Tensor:
-        """Merge per-model detection tensors into one tensor in merged class space."""
-        bbox_conf = self.BBOX_CONF_COLS
-        batch_size = det_tensors[0].shape[0]
-        total_dets = sum(d.shape[1] for d in det_tensors)
-        total_cols = bbox_conf + self._num_merged_classes
-        output = torch.zeros(
-            (batch_size, total_dets, total_cols),
-            device=det_tensors[0].device,
-            dtype=det_tensors[0].dtype,
-        )
-        offset = 0
-        for dets, model_map in zip(det_tensors, self._model_to_merged_maps):
-            n = dets.shape[1]
-            output[:, offset : offset + n, :bbox_conf] = dets[:, :, :bbox_conf]
-            for model_idx, merged_idx in model_map.items():
-                output[:, offset : offset + n, bbox_conf + merged_idx] = dets[:, :, bbox_conf + model_idx]
-            offset += n
-        return output
-
-    def prepare_for_export(self, dynamic: bool = False):
-        """Prepare all ensemble models for export."""
-        LOGGER.info(f"✨ Preparing {self.__class__.__name__} for export...")
-        for m in self._det_models:
-            m.prepare_for_export(dynamic)

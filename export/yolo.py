@@ -8,8 +8,7 @@ https://onnx.ai/
 The exported ONNX model can be used with various inference engines and accelerators,
 including TensorRT for optimized GPU inference.
 
-One argument controls the model: --det-weights. One path → YOLO (single model).
-Two or more paths → YOLOEnsemble (same input, fused outputs with class alignment).
+One argument controls the model: --det-weights. One path = single model; two or more = ensemble (same input, fused outputs with class alignment).
 
 Example (YOLO - single model):
     # Using local weights files:
@@ -31,7 +30,7 @@ Example (YOLO - single model):
         --half \
         --fname yolo.onnx
 
-Example (YOLOEnsemble - multiple models with class alignment):
+Example (ensemble - multiple models with class alignment):
     # Combine primary and secondary models with proper class alignment:
     python export/yolo.py \
         --det_weights yolov5m.pt yolov5n.pt \
@@ -57,7 +56,7 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 
 from utils.export import export_model_to_onnx, get_weights_path, transform_sz
-from models.custom import YOLO, YOLOEnsemble
+from models.custom import YOLO
 
 
 def main(
@@ -72,27 +71,18 @@ def main(
     trt7_compatible: bool = False,
     fname: str = "",
 ):
-    """Export the YOLO model to ONNX format. One weight → YOLO; multiple → YOLOEnsemble."""
+    """Export the YOLO model to ONNX format. One or more weights → single YOLO (ensemble if multiple)."""
     imgsz = transform_sz(imgsz)
     infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
     weights_list = [get_weights_path(w) for w in det_weights]
 
-    if len(weights_list) == 1:
-        model = YOLO(
-            obj_det_weights=weights_list[0],
-            fp16=half,
-            fuse=fuse,
-            imgsz=imgsz,
-            infsz=infsz,
-        )
-    else:
-        model = YOLOEnsemble(
-            weights_list=weights_list,
-            fp16=half,
-            fuse=fuse,
-            imgsz=imgsz,
-            infsz=infsz,
-        )
+    model = YOLO(
+        weights=weights_list,
+        fp16=half,
+        fuse=fuse,
+        imgsz=imgsz,
+        infsz=infsz,
+    )
 
     # Validate model before export
     try:
@@ -129,7 +119,7 @@ def _parse_args():
         nargs="+",
         required=True,
         metavar="WEIGHTS",
-        help="One or more weight paths (or W&B artifacts). One → YOLO; two or more → YOLOEnsemble (fused outputs).",
+        help="One or more weight paths (or W&B artifacts). One = single model; two or more = ensemble (fused outputs).",
     )
     parser.add_argument("-sz", "--imgsz", nargs="+", type=int, default=[640, 640], help="image input shape (h, w)")
     parser.add_argument(
