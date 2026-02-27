@@ -1,18 +1,17 @@
 """
 Export YOLO to ONNX format.
 
-ONNX is an open standard for machine learning models that enables interoperability 
+ONNX is an open standard for machine learning models that enables interoperability
 between different frameworks and platforms.
 https://onnx.ai/
 
 The exported ONNX model can be used with various inference engines and accelerators,
 including TensorRT for optimized GPU inference.
 
-This script supports two modes:
-1. SeaYOLO - Single model export (default behavior)
-2. OneberryYolo - Dual model export with class alignment
+One argument controls the model: --det-weights. One path → YOLO (single model).
+Two or more paths → YOLOEnsemble (same input, fused outputs with class alignment).
 
-Example (SeaYOLO - single model):
+Example (YOLO - single model):
     # Using local weights files:
     python export/yolo.py \
         --det_weights yolov5n.pt \
@@ -32,11 +31,10 @@ Example (SeaYOLO - single model):
         --half \
         --fname yolo.onnx
 
-Example (OneberryYolo - dual model with class alignment):
+Example (YOLOEnsemble - multiple models with class alignment):
     # Combine primary and secondary models with proper class alignment:
     python export/yolo.py \
-        --det_weights yolov5m.pt \
-        --secondary_weights yolov5n.pt \
+        --det_weights yolov5m.pt yolov5n.pt \
         --imgsz 640 \
         --batch-size 2 \
         --fuse \
@@ -49,7 +47,7 @@ NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 import argparse
 import sys
 from pathlib import Path
-from typing import Tuple
+from typing import List, Tuple
 
 import torch
 
@@ -59,10 +57,11 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 
 from utils.export import export_model_to_onnx, get_weights_path, transform_sz
-from models.custom import SeaYOLO, OneberryYolo
+from models.custom import YOLO, YOLOEnsemble
+
 
 def main(
-    det_weights: str,
+    det_weights: List[str],
     imgsz: int | Tuple[int, int],
     infsz: int | Tuple[int, int] | None,
     batch_size: int,
@@ -72,30 +71,23 @@ def main(
     simplify: bool = False,
     trt7_compatible: bool = False,
     fname: str = "",
-    secondary_weights: str = "",  # For OneberryYolo
 ):
-    """Export the YOLO model to ONNX format."""
-    # Transform image size to (height, width) format
+    """Export the YOLO model to ONNX format. One weight → YOLO; multiple → YOLOEnsemble."""
     imgsz = transform_sz(imgsz)
     infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
-    det_weights = get_weights_path(det_weights)
+    weights_list = [get_weights_path(w) for w in det_weights]
 
-    # Choose model based on whether secondary_weights is provided
-    if secondary_weights:
-        # Use OneberryYolo for dual-model export
-        secondary_weights = get_weights_path(secondary_weights)
-        model = OneberryYolo(
-            primary_weights=det_weights,
-            secondary_weights=secondary_weights,
+    if len(weights_list) == 1:
+        model = YOLO(
+            obj_det_weights=weights_list[0],
             fp16=half,
             fuse=fuse,
             imgsz=imgsz,
             infsz=infsz,
         )
     else:
-        # Use SeaYOLO for single-model export
-        model = SeaYOLO(
-            obj_det_weights=det_weights,
+        model = YOLOEnsemble(
+            weights_list=weights_list,
             fp16=half,
             fuse=fuse,
             imgsz=imgsz,
@@ -108,7 +100,7 @@ def main(
         dummy_input = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device)
         dummy_input = dummy_input.half() if half else dummy_input.float()
         dummy_input /= 255.0
-        
+
         with torch.no_grad():
             _ = model(dummy_input)
         print("✅ Model validation successful - forward pass works")
@@ -134,16 +126,10 @@ def _parse_args():
     parser.add_argument(
         "-dw",
         "--det-weights",
-        type=str,
+        nargs="+",
         required=True,
-        help="Path to the object detection model weights or W&B artifact (e.g., 'YOLOv5n-IR:latest'). For OneberryYolo, this will be used as the primary model.",
-    )
-    parser.add_argument(
-        "-sw",
-        "--secondary-weights",
-        type=str,
-        default="",
-        help="Path to the secondary model weights for OneberryYolo. If provided, OneberryYolo will be used instead of SeaYOLO.",
+        metavar="WEIGHTS",
+        help="One or more weight paths (or W&B artifacts). One → YOLO; two or more → YOLOEnsemble (fused outputs).",
     )
     parser.add_argument("-sz", "--imgsz", nargs="+", type=int, default=[640, 640], help="image input shape (h, w)")
     parser.add_argument(
@@ -203,4 +189,3 @@ def _parse_args():
 if __name__ == "__main__":
     args = _parse_args()
     main(**vars(args))
-

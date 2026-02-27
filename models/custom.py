@@ -1,11 +1,11 @@
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
 from torch import nn
 from torchvision import transforms
-from ultralytics import YOLO
+from ultralytics import YOLO as UltralyticsYOLO
 from ultralytics.nn.tasks import BaseModel as UBaseModel
 
 from models.common import Classify, DetectMultiBackend
@@ -31,7 +31,7 @@ class OBBModel(UBaseModel):
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
-            model = YOLO(model=weights)
+            model = UltralyticsYOLO(model=weights)
             LOGGER.info(f"Loaded weights from {weights}")
         else:
             raise ValueError("model must be a path to a .pt file")
@@ -345,11 +345,10 @@ class ObjectsModel(BaseModel):
                 m.export = True
 
 
-class SeaYOLO(nn.Module):
-    """Custom YOLO model with preprocessing and postprocessing hooks for Sea.AI.
-    
-    This is a simplified version of AHOY that only includes object detection
-    (no horizon detection). It provides:
+class YOLO(nn.Module):
+    """YOLO model with preprocessing and postprocessing hooks.
+
+    Single object-detection model with:
     - Automatic preprocessing (normalization, optional resizing/padding)
     - Postprocessing hooks (type conversion, box scaling)
     - Export preparation
@@ -358,14 +357,14 @@ class SeaYOLO(nn.Module):
     def __init__(
         self,
         obj_det_weights: str,
-        device: Union[str, torch.device] = None,  # automatically select device
+        device: Optional[Union[str, torch.device]] = None,  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
         imgsz: Tuple[int, int] = (640, 640),
         infsz: Optional[Tuple[int, int]] = None,
     ):
-        """Initialize SeaYOLO model.
-        
+        """Initialize YOLO model.
+
         Args:
             obj_det_weights: Path to model weights file
             device: Device to run model on (automatically selected if None)
@@ -392,7 +391,7 @@ class SeaYOLO(nn.Module):
         self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
 
         LOGGER.debug(
-            f"SeaYOLO model info: "
+            f"YOLO model info: "
             f"model.type={type(self.obj_det.model).__name__}, "
             f"save={self.obj_det.save}, "
             f"stride={self.obj_det.stride}"
@@ -406,7 +405,7 @@ class SeaYOLO(nn.Module):
 
     def forward(self, x, profile=False, visualize=False):
         """Forward pass through model.
-        
+
         Returns detections.
         """
         return self.obj_det(x, profile, visualize)
@@ -440,7 +439,7 @@ class SeaYOLO(nn.Module):
         if imgsz == infsz or infsz is None:
             return None, None
 
-        pad_left, pad_right, pad_top, pad_bottom = SeaYOLO.get_padding_for_aspect_ratio(imgsz, infsz)
+        pad_left, pad_right, pad_top, pad_bottom = YOLO.get_padding_for_aspect_ratio(imgsz, infsz)
         ratio = max(imgsz[0] / infsz[0], imgsz[1] / infsz[1])
         ratio_pad = [[1 / ratio], [pad_left, pad_top]]  # [[gain], [pad_x, pad_y]] for scale_boxes
         transform = transforms.Compose([])
@@ -535,17 +534,11 @@ class SeaYOLO(nn.Module):
         self.obj_det.prepare_for_export(dynamic)
 
 
-class AHOY(SeaYOLO):
-    """Base class for AHOY models that extends SeaYOLO with horizon detection.
+class AHOY(YOLO):
+    """Base class for AHOY models that extends YOLO with horizon detection.
 
-    AHOY Stands for the following:
-    - **A**
-    - **H**orizon and
-    - **O**bject detection
-    - **Y**olo-based model
-    
-    This class inherits all preprocessing, hook management, and transform logic
-    from SeaYOLO and adds horizon detection capabilities.
+    AHOY: **A** **H**orizon and **O**bject detection **Y**OLO-based model.
+    Inherits preprocessing, hook management, and transform logic from YOLO.
     """
 
     def __new__(cls, hor_det_weights: str, **kwargs):
@@ -574,7 +567,7 @@ class AHOY(SeaYOLO):
         infsz: Optional[Tuple[int, int]] = None,
     ):
         """Initialize AHOY model with object detection and horizon detection.
-        
+
         Args:
             obj_det_weights: Path to object detection model weights
             hor_det_weights: Path to horizon detection model weights
@@ -594,7 +587,7 @@ class AHOY(SeaYOLO):
             imgsz=imgsz,
             infsz=infsz,
         )
-        
+
         # Load horizon detection model
         self.hor_det_weights = hor_det_weights
         self.hor_det = self.load_hor_det(self.hor_det_weights, device=device, fp16=fp16, fuse=fuse)
@@ -940,164 +933,119 @@ def _get_classification_heads(model, cutoff, nc_pitch, nc_theta):
     return c_pitch, c_theta
 
 
-class OneberryYolo(SeaYOLO):
-    """Custom YOLO model that combines two YOLOv5 models (primary and secondary).
-    
-    Predictions from both models are combined with proper class alignment.
-    This allows for a hybrid approach where the primary model provides broader coverage
-    while the secondary model provides focused detections.
+def _build_merged_names_and_mappings(
+    model_names_list: Sequence[Dict[int, str]],
+) -> Tuple[Dict[int, str], List[Dict[int, int]]]:
+    """Build merged class names and per-model index mappings.
+
+    Processes models in order. For each class name: if it already exists in the
+    merged set (case-insensitive), the model's class maps to that index;
+    otherwise the class is appended and the model maps to the new index.
+
+    Returns:
+        merged_names: dict merged_idx -> class_name
+        model_to_merged_maps: list of dicts, one per model: model_class_idx -> merged_idx
     """
+    merged_names: Dict[int, str] = {}
+    model_to_merged_maps: List[Dict[int, int]] = []
+
+    for names in model_names_list:
+        model_map: Dict[int, int] = {}
+        for model_idx, name in names.items():
+            name_lower = name.lower()
+            found = None
+            for merged_idx, merged_name in merged_names.items():
+                if merged_name.lower() == name_lower:
+                    found = merged_idx
+                    break
+            if found is not None:
+                model_map[model_idx] = found
+            else:
+                new_idx = len(merged_names)
+                merged_names[new_idx] = name
+                model_map[model_idx] = new_idx
+        model_to_merged_maps.append(model_map)
+
+    return merged_names, model_to_merged_maps
+
+
+class YOLOEnsemble(YOLO):
+    """Ensemble of YOLO detection models on the same input with fused outputs.
+
+    Runs an arbitrary number of detection models in parallel on the same input,
+    merges their class names (shared names map to the same output class index),
+    and concatenates detections into a single tensor in merged class space.
+    """
+
+    BBOX_CONF_COLS = 5  # x1, y1, x2, y2, confidence
 
     def __init__(
         self,
-        primary_weights: str,
-        secondary_weights: str,
-        device: Union[str, torch.device] = None,  # automatically select device
+        weights_list: Sequence[str],
+        device: Optional[Union[str, torch.device]] = None,
         fp16: bool = False,
-        fuse: bool = True,  # fuse conv and bn layers
+        fuse: bool = True,
         imgsz: Tuple[int, int] = (640, 640),
         infsz: Optional[Tuple[int, int]] = None,
     ):
-        """Initialize OneberryYolo model.
-        
+        """Initialize YOLOEnsemble.
+
         Args:
-            primary_weights: Path to primary model weights file
-            secondary_weights: Path to secondary model weights file
-            device: Device to run model on (automatically selected if None)
-            fp16: Use half precision (fp16)
-            fuse: Fuse conv and batch norm layers
-            imgsz: Input image size (height, width)
-            infsz: Inference size (height, width). If different from imgsz,
-                   the model will apply resize/padding transformations
+            weights_list: Paths to model weights (at least 2). First model drives
+                device, stride, and preprocessing (YOLO).
+            device: Device to run models on (auto if None).
+            fp16: Use half precision.
+            fuse: Fuse conv and batch norm layers.
+            imgsz: Input image size (height, width).
+            infsz: Inference size; if different from imgsz, resize/pad is applied.
         """
-        # Initialize parent SeaYOLO with primary model
+        if len(weights_list) < 2:
+            raise ValueError("weights_list must contain at least 2 model paths")
         super().__init__(
-            obj_det_weights=primary_weights,
+            obj_det_weights=weights_list[0],
             device=device,
             fp16=fp16,
             fuse=fuse,
             imgsz=imgsz,
             infsz=infsz,
         )
-        
-        # Load secondary model
-        self.secondary_model = ObjectsModel(secondary_weights, device=device, fp16=fp16, fuse=fuse)
-        
-        # Store class mappings for proper alignment
-        self.primary_names = self.obj_det.names
-        self.secondary_names = self.secondary_model.names
-        
-        # Create merged class names and mapping
-        self._create_class_mapping()
-        
-        LOGGER.info(f"Primary model classes: {self.primary_names}")
-        LOGGER.info(f"Secondary model classes: {self.secondary_names}")
-        LOGGER.info(f"Merged classes: {self.names}")
-        LOGGER.info(f"Secondary class mapping: {self.secondary_to_merged_map}")
-        
-        LOGGER.info(
-            f"OneberryYolo model info: "
-            f"primary_stride={self.obj_det.stride}, "
-            f"secondary_stride={self.secondary_model.stride}, "
-            f"combined_stride={self.stride}"
-        )
-
-    def _create_class_mapping(self):
-        """Create merged class names and mapping from secondary to merged indices.
-        
-        Common classes between primary and secondary models will share the same class ID.
-        Unique classes from secondary model will be appended after primary classes.
-        """
-        # Start with primary model classes
-        merged_names = dict(self.primary_names)
-        
-        # Create mapping for secondary model: secondary_idx -> merged_idx
-        self.secondary_to_merged_map = {}
-        
-        for sec_idx, sec_name in self.secondary_names.items():
-            # Check if this class exists in primary model
-            found_in_primary = False
-            for prim_idx, prim_name in self.primary_names.items():
-                if sec_name.lower() == prim_name.lower():  # Case-insensitive match
-                    # Map secondary class to existing primary class
-                    self.secondary_to_merged_map[sec_idx] = prim_idx
-                    found_in_primary = True
-                    LOGGER.info(f"Common class found: '{sec_name}' (secondary idx {sec_idx} -> primary idx {prim_idx})")
-                    break
-            
-            if not found_in_primary:
-                # Add unique secondary class to merged list
-                new_idx = len(merged_names)
-                merged_names[new_idx] = sec_name
-                self.secondary_to_merged_map[sec_idx] = new_idx
-        
-        self.names = merged_names
-        self.num_merged_classes = len(merged_names)
+        self._weights_list = list(weights_list)
+        self._det_models = [self.obj_det] + [
+            ObjectsModel(w, device=self.device, fp16=fp16, fuse=fuse) for w in weights_list[1:]
+        ]
+        names_list: List[Dict[int, str]] = [m.names for m in self._det_models]
+        self.names, self._model_to_merged_maps = _build_merged_names_and_mappings(names_list)
+        self._num_merged_classes = len(self.names)
+        LOGGER.info(f"YOLOEnsemble: {len(self._det_models)} models, merged classes={list(self.names.values())}")
 
     def forward(self, x, profile=False, visualize=False):
-        """Forward pass through both models.
-        
-        Returns combined detections with secondary model.
-        """
-        
-        # Get predictions from both models
-        primary_preds = self.obj_det(x, profile, visualize)
-        secondary_preds = self.secondary_model(x, profile, visualize)
-        
-        # Combine predictions
-        combined_preds = self._combine_predictions(primary_preds, secondary_preds)
-        
-        return combined_preds
+        """Run all models on the same input and return fused detections."""
+        preds = [m(x, profile, visualize) for m in self._det_models]
+        det_tensors = [p[0] if isinstance(p, tuple) else p for p in preds]
+        return (self._fuse_detections(det_tensors),)
 
-    def _combine_predictions(self, primary_preds, secondary_preds):
-        """Combine predictions from primary and secondary models with proper class alignment.
-        
-        Common classes are merged to use the same class ID in the output.
-        """
-        # YOLOv5 returns a tuple with detection tensor at index 0
-        primary_dets = primary_preds[0] if isinstance(primary_preds, tuple) else primary_preds
-        secondary_dets = secondary_preds[0] if isinstance(secondary_preds, tuple) else secondary_preds
-        
-        # Calculate expected columns based on class counts
-        merged_classes = self.num_merged_classes
-        bbox_conf_cols = 5  # x1, y1, x2, y2, confidence
-        
-        batch_size = primary_dets.shape[0]
-        total_dets = primary_dets.shape[1] + secondary_dets.shape[1]
-        total_cols = bbox_conf_cols + merged_classes
-        
-        # Create output tensor with merged class space
+    def _fuse_detections(self, det_tensors: List[torch.Tensor]) -> torch.Tensor:
+        """Merge per-model detection tensors into one tensor in merged class space."""
+        bbox_conf = self.BBOX_CONF_COLS
+        batch_size = det_tensors[0].shape[0]
+        total_dets = sum(d.shape[1] for d in det_tensors)
+        total_cols = bbox_conf + self._num_merged_classes
         output = torch.zeros(
             (batch_size, total_dets, total_cols),
-            device=primary_dets.device,
-            dtype=primary_dets.dtype
+            device=det_tensors[0].device,
+            dtype=det_tensors[0].dtype,
         )
-        
-        # Copy primary detections
-        # Bbox and confidence (first 5 columns)
-        output[:, :primary_dets.shape[1], :bbox_conf_cols] = primary_dets[:, :, :bbox_conf_cols]
-        # Class probabilities (primary classes maintain their indices in merged space)
-        num_primary_classes = len(self.primary_names)
-        output[:, :primary_dets.shape[1], bbox_conf_cols:bbox_conf_cols + num_primary_classes] = \
-            primary_dets[:, :, bbox_conf_cols:]
-        
-        # Remap secondary detections to merged class space
-        secondary_start_idx = primary_dets.shape[1]
-        
-        # Copy bbox and confidence (first 5 columns)
-        output[:, secondary_start_idx:, :bbox_conf_cols] = secondary_dets[:, :, :bbox_conf_cols]
-        
-        # Remap class probabilities using the mapping
-        for sec_idx, merged_idx in self.secondary_to_merged_map.items():
-            # Copy class probability from secondary position to merged position
-            output[:, secondary_start_idx:, bbox_conf_cols + merged_idx] = \
-                secondary_dets[:, :, bbox_conf_cols + sec_idx]
-        
-        return (output,)
+        offset = 0
+        for dets, model_map in zip(det_tensors, self._model_to_merged_maps):
+            n = dets.shape[1]
+            output[:, offset : offset + n, :bbox_conf] = dets[:, :, :bbox_conf]
+            for model_idx, merged_idx in model_map.items():
+                output[:, offset : offset + n, bbox_conf + merged_idx] = dets[:, :, bbox_conf + model_idx]
+            offset += n
+        return output
 
     def prepare_for_export(self, dynamic: bool = False):
-        """Prepare both models for export."""
+        """Prepare all ensemble models for export."""
         LOGGER.info(f"✨ Preparing {self.__class__.__name__} for export...")
-        self.obj_det.prepare_for_export(dynamic)
-        self.secondary_model.prepare_for_export(dynamic)
-
+        for m in self._det_models:
+            m.prepare_for_export(dynamic)
