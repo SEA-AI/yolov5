@@ -106,7 +106,7 @@ def main(
         batch_size=batch_size,
         fname=fname,
         dynamic=dynamic,
-        simplify=simplify,
+        simplify=True if len(weights_list) > 1 else simplify,  # onnx2torch might complain otherwise
         trt7_compatible=trt7_compatible,
     )
 
