@@ -650,8 +650,8 @@ def export_onnx_trt7_compatible(model, im, file, dynamic, simplify, opset=12, pr
         ```
     """
     LOGGER.info(f"\n{prefix} exporting TensorRT 7 compatible ONNX...")
-    from models.custom import AHOY, DAN
-    if isinstance(model, AHOY):
+    from models.custom import AHOY, DAN, SeaYOLO
+    if isinstance(model, (AHOY, SeaYOLO)):
         grid = model.obj_det.model[-1].anchor_grid
         model.obj_det.model[-1].anchor_grid = [a[..., :1, :1, :] for a in grid]
         export_onnx(model, im, file, opset, dynamic, simplify)  # opset 12

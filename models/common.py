@@ -661,6 +661,7 @@ class DetectMultiBackend(nn.Module):
             config = pdi.Config(str(model_file), str(params_file))
             if cuda:
                 config.enable_use_gpu(memory_pool_init_size_mb=2048, device_id=0)
+            config.disable_mkldnn()  # disable MKL-DNN for PIR compatibility
             predictor = pdi.create_predictor(config)
             input_handle = predictor.get_input_handle(predictor.get_input_names()[0])
             output_names = predictor.get_output_names()
@@ -725,7 +726,7 @@ class DetectMultiBackend(nn.Module):
             y = self.model.predict({"image": im})  # coordinates are xywh normalized
             if "confidence" in y:
                 box = xywh2xyxy(y["coordinates"] * [[w, h, w, h]])  # xyxy pixels
-                conf, cls = y["confidence"].max(1), y["confidence"].argmax(1).astype(np.float)
+                conf, cls = y["confidence"].max(1), y["confidence"].argmax(1).astype(float)
                 y = np.concatenate((box, conf.reshape(-1, 1), cls.reshape(-1, 1)), 1)
             else:
                 y = list(reversed(y.values()))  # reversed for segmentation models (pred, proto)
