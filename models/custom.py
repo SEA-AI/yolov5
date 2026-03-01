@@ -738,14 +738,10 @@ def get_weights_path(weights_path: str) -> str:
     api = wandb.Api()
 
     # Build candidates: registry (collection:version) first, then run artifact path
+    candidates = []
     if ":" in weights_path and "/" not in weights_path.split(":")[0]:
-        collection, version = weights_path.split(":")
-        candidates = [
-            (f"wandb-registry-model/{collection}:{version}", "registry"),
-            (weights_path, "run"),
-        ]
-    else:
-        candidates = [(weights_path, "run")]
+        candidates.append((f"wandb-registry-model/{weights_path}", "registry"))
+    candidates.append((weights_path, "run"))
 
     for artifact_name, kind in candidates:
         LOGGER.info(f"Attempting to download from {kind}: {artifact_name}")
