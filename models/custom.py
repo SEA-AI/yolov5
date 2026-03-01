@@ -737,30 +737,20 @@ def get_weights_path(weights_path: str) -> str:
 
     api = wandb.Api()
 
-    # Try registry first (format: collection:version)
+    # Build candidates: registry (collection:version) first, then run artifact path
     if ":" in weights_path and "/" not in weights_path.split(":")[0]:
-        try:
-            collection, version = weights_path.split(":")
-            artifact_name = f"wandb-registry-model/{collection}:{version}"
-            LOGGER.info(f"Attempting to download from registry: {artifact_name}")
+        collection, version = weights_path.split(":")
+        candidates = [
+            (f"wandb-registry-model/{collection}:{version}", "registry"),
+            (weights_path, "run"),
+        ]
+    else:
+        candidates = [(weights_path, "run")]
 
-            artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
-            return str(next(Path(artifact_path).glob("*.pt")))
-
-        except Exception as e:
-            LOGGER.warning(f"Failed to download from registry: {e}")
-
-    # Try as direct run artifact (format: entity/project/artifact:version)
-    try:
-        LOGGER.info(f"Attempting to download as run artifact: {weights_path}")
-        artifact_path = api.artifact(name=weights_path).download(
-            root=Path("artifacts", weights_path.replace("/", "_").replace(":", "_"))
-        )
+    for artifact_name, kind in candidates:
+        LOGGER.info(f"Attempting to download from {kind}: {artifact_name}")
+        artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
         return str(next(Path(artifact_path).glob("*.pt")))
-
-    except Exception as e:
-        LOGGER.error(f"Failed to download from W&B run: {e}")
-        raise e
 
 
 def transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:

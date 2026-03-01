@@ -57,7 +57,7 @@ def export_model_to_onnx(
     if not fname:
         input_size = f"{imgsz[0]}x{imgsz[1]}"
         base = type(model).__name__.lower()
-        if len(model.obj_det_weights) > 1:
+        if isinstance(model.obj_det_weights, list) and len(model.obj_det_weights) > 1:
             base = f"{base}ensemble"
         fname = f"{base}_b{batch_size}_sz{input_size}.onnx"
     LOGGER.info(f"🚀 Exporting model {type(model).__name__} to {fname}...")
