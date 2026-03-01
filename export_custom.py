@@ -4,35 +4,32 @@ Weights can be local paths or W&B artifacts (e.g. entity/project/run:v0).
 
 Usage:
   # YOLO single
-  python export_custom.py --det-weights yolov5n.pt --imgsz 480 640 --half --fuse --fname yolo.onnx
-  python export_custom.py --det-weights sea-ai/yolo-train/run_xxx:v0 --imgsz 480 640 --half --fuse --fname yolo.onnx
+  python export_custom.py --det-weights YOLOv5n-IR:latest --imgsz 480 640 --half --fuse --fname yolo.onnx
+  python export_custom.py --det-weights sea-ai/yolo-train/run_xxx:v0 --imgsz 480 640 --half --fuse
 
   # YOLO ensemble
-  python export_custom.py --det-weights model1.pt model2.pt --imgsz 480 640 --half --fuse --fname yoloensemble.onnx
+  python export_custom.py --det-weights YOLOv5m-IR:latest YOLOv5n-H:latest --imgsz 480 640 --half --fuse
 
   # AHOY (set --hor-weights)
-  python export_custom.py --det-weights YOLOv5n-IR:latest --hor-weights sea-ai/ultralytics/run_xxx:v0 \\
-      --imgsz 1080 3600 --infsz 572 1920 --batch-size 1 --half --fuse --fname ahoy.onnx
+  python export_custom.py --det-weights YOLOv5n-MIX:latest --hor-weights sea-ai/ultralytics/run_xxx:v0 \\
+      --imgsz 1080 3600 --infsz 572 1920 --batch-size 1 --half --fuse
+
+Use --trt7-compatible to export TensorRT 7 compatible model.
 """
 
 import argparse
-import sys
 from pathlib import Path
 from typing import List, Tuple
 
 import torch
 
-FILE = Path(__file__).resolve()
-ROOT = FILE.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 from export import export_onnx, export_onnx_trt7_compatible
+from models.custom import AHOY, YOLO
 from utils.general import LOGGER
 
 
 def export_model_to_onnx(
-    model,
+    model: YOLO | AHOY,
     imgsz: Tuple[int, int],
     batch_size: int,
     fname: str,
@@ -101,8 +98,6 @@ def main(
 ):
     """Export YOLO or AHOY to ONNX. If hor_weights is set, build AHOY; else YOLO (ensemble if len(det_weights) > 1)."""
     if hor_weights is not None:
-        from models.custom import AHOY
-
         model = AHOY(
             obj_det_weights=det_weights,
             hor_det_weights=hor_weights,
@@ -112,8 +107,6 @@ def main(
             infsz=infsz,
         )
     else:
-        from models.custom import YOLO
-
         model = YOLO(
             weights=det_weights,
             fp16=half,
