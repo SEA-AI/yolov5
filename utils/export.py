@@ -52,6 +52,17 @@ def get_weights_path(weights_path: str) -> str | None:
         artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
         return str(next(Path(artifact_path).glob("*.pt")))
 
+    for artifact_name, kind in candidates:
+        try:
+            artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
+            artifact_path = str(next(Path(artifact_path).glob("*.pt")))
+            LOGGER.info(f"Successfully downloaded {kind}: {artifact_name}")
+            return artifact_path
+        except Exception as e:
+            LOGGER.warning(f"Download failed for {artifact_name} ({kind}): {e}")
+
+    return None
+
 
 def transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
     """
