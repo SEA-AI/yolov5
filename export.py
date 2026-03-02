@@ -389,18 +389,13 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
                 getattr(model.model_b, "hor_det_weights", None),
             ],
         }
-    elif isinstance(model, (YOLO, AHOY)):
+    else:
         d = {
             "stride": int(max(model.stride)),
             "names": model.names,
             "resize": get_resize_info(model),
             "det_weights": getattr(model, "obj_det_weights", None),
             "hor_weights": getattr(model, "hor_det_weights", None),
-        }
-    else:
-        d = {
-            "stride": int(max(model.stride)),
-            "names": model.names,
         }
 
     for k, v in {k: v for k, v in d.items() if v}.items():
