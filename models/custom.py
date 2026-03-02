@@ -367,14 +367,17 @@ class YOLO(nn.Module):
     ):
         """Initialize YOLO. Pass one path for single model, N paths for ensemble (merged output)."""
         super().__init__()
-        self.obj_det_weights = weights[0] if len(weights) == 1 else weights  # saved in onnx model metadata
 
         weights_list = [weights] if isinstance(weights, str) else list(weights)
         if not weights_list:
             raise ValueError("weights must be at least one path")
-        self._det_models = [
-            ObjectsModel(get_weights_path(w), device=device, fp16=fp16, fuse=fuse) for w in weights_list
-        ]
+        self.obj_det_weights = (
+            weights_list[0] if len(weights_list) == 1 else weights_list
+        )  # saved in onnx model metadata
+        self._det_models = nn.ModuleList(
+            [ObjectsModel(get_weights_path(w), device=device, fp16=fp16, fuse=fuse) for w in weights_list]
+        )
+
         # First model drives device, stride, and preprocessing
         self.obj_det = self._det_models[0]
         self.device = self.obj_det.device
