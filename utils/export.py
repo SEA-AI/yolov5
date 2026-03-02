@@ -6,12 +6,15 @@ to minimize code duplication.
 """
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, TYPE_CHECKING
 
 import torch
 
 from export import export_onnx, export_onnx_trt7_compatible
 from utils.general import LOGGER
+
+if TYPE_CHECKING:
+    from models.custom import YOLO, AHOY
 
 
 def get_weights_path(weights_path: str) -> str:
@@ -86,8 +89,9 @@ def transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
         raise ValueError(f"imgsz must be int or a list/tuple of 1 or 2 elements, got {imgsz}")
     return imgsz[0], imgsz[-1]
 
+
 def export_model_to_onnx(
-    model,
+    model: "YOLO | AHOY",
     imgsz: Tuple[int, int],
     batch_size: int,
     fname: str,
@@ -116,7 +120,10 @@ def export_model_to_onnx(
 
     if not fname:
         input_size = f"{imgsz[0]}x{imgsz[1]}"
-        fname = f"{type(model).__name__.lower()}_b{batch_size}_sz{input_size}.onnx"
+        base = f"{type(model).__name__.lower()}"
+        if isinstance(model.obj_det_weights, list) and len(model.obj_det_weights) > 1:
+            base = f"{base}ensemble"
+        fname = f"{base}_b{batch_size}_sz{input_size}.onnx"
     LOGGER.info(f"🚀 Exporting model {type(model).__name__} to {fname}...")
 
     model.prepare_for_export(dynamic=dynamic)
@@ -139,6 +146,5 @@ def export_model_to_onnx(
         simplify=simplify,
         opset=12,
     )
-    
-    return result
 
+    return result
