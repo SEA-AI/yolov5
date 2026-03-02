@@ -1,16 +1,18 @@
+from itertools import chain
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
 from torch import nn
 from torchvision import transforms
-from ultralytics import YOLO
+from ultralytics import YOLO as UltralyticsYOLO
 from ultralytics.nn.tasks import BaseModel as UBaseModel
 
 from models.common import Classify, DetectMultiBackend
 from models.experimental import attempt_load
 from models.yolo import BaseModel, Detect, DetectionModel
+from utils.export import get_weights_path, transform_sz
 from utils.general import LOGGER, scale_boxes
 from utils.plots import feature_visualization
 from utils.torch_utils import is_obb_weights, select_device
@@ -22,16 +24,16 @@ class OBBModel(UBaseModel):
     def __init__(
         self,
         weights: str = "yolov11n-obb.pt",
-        device: Union[str, torch.device] = None,  # automatically select device
+        device: Union[str, torch.device] = "",  # automatically select device
         fp16: bool = False,
         fuse: bool = False,
     ):
         super().__init__()
-        self.device = select_device(device)
+        self.device = select_device(str(device))
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
-            model = YOLO(model=weights)
+            model = UltralyticsYOLO(model=weights)
             LOGGER.info(f"Loaded weights from {weights}")
         else:
             raise ValueError("model must be a path to a .pt file")
@@ -84,7 +86,7 @@ class HorizonModel(BaseModel):
         weights: str = "yolov5n.pt",
         nc_pitch: int = 500,
         nc_theta: int = 500,
-        device: Union[str, torch.device] = None,  # automatically select device
+        device: Union[str, torch.device] = "",  # automatically select device
         cutoff: int = None,
         fp16: bool = False,
         fuse: bool = False,  # false for training, true for inference
@@ -109,7 +111,7 @@ class HorizonModel(BaseModel):
 
         self.nc_pitch = nc_pitch
         self.nc_theta = nc_theta
-        self.device = select_device(device)
+        self.device = select_device(str(device))
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
@@ -307,12 +309,12 @@ class ObjectsModel(BaseModel):
     def __init__(
         self,
         weights: str = "yolov5n.pt",
-        device: Union[str, torch.device] = None,  # automatically select device
+        device: Union[str, torch.device] = "",  # automatically select device
         fp16: bool = False,
         fuse: bool = False,
     ):
         super().__init__()
-        self.device = select_device(device)
+        self.device = select_device(str(device))
         self.fp16 = fp16
 
         if Path(weights).is_file() or weights.endswith(".pt"):
@@ -345,71 +347,96 @@ class ObjectsModel(BaseModel):
                 m.export = True
 
 
-class SeaYOLO(nn.Module):
-    """Custom YOLO model with preprocessing and postprocessing hooks for Sea.AI.
-    
-    This is a simplified version of AHOY that only includes object detection
-    (no horizon detection). It provides:
-    - Automatic preprocessing (normalization, optional resizing/padding)
-    - Postprocessing hooks (type conversion, box scaling)
-    - Export preparation
+class YOLO(nn.Module):
+    """YOLO model: one or more detection weights, same input, single output.
+
+    - One weight: single detection model with preprocessing/postprocessing hooks.
+    - Two or more weights: ensemble (same input to all, merged output with shared class space).
     """
+
+    N_FIXED_COLS = 5  # x1, y1, x2, y2, confidence
 
     def __init__(
         self,
-        obj_det_weights: str,
-        device: Union[str, torch.device] = None,  # automatically select device
+        weights: Union[str, Sequence[str]],
+        device: Union[str, torch.device] = "",
         fp16: bool = False,
-        fuse: bool = True,  # fuse conv and bn layers
-        imgsz: Tuple[int, int] = (640, 640),
-        infsz: Optional[Tuple[int, int]] = None,
+        fuse: bool = True,
+        imgsz: int | Tuple[int, int] = 640,
+        infsz: int | Tuple[int, int] | None = None,
     ):
-        """Initialize SeaYOLO model.
-        
-        Args:
-            obj_det_weights: Path to model weights file
-            device: Device to run model on (automatically selected if None)
-            fp16: Use half precision (fp16)
-            fuse: Fuse conv and batch norm layers
-            imgsz: Input image size (height, width)
-            infsz: Inference size (height, width). If different from imgsz,
-                   the model will apply resize/padding transformations
-        """
+        """Initialize YOLO. Pass one path for single model, N paths for ensemble (merged output)."""
         super().__init__()
-        self.obj_det_weights = obj_det_weights
-        self.obj_det = self.load_obj_det(self.obj_det_weights, device=device, fp16=fp16, fuse=fuse)
+
+        weights_list = [weights] if isinstance(weights, str) else list(weights)
+        if not weights_list:
+            raise ValueError("weights must be at least one path")
+        self.obj_det_weights = (
+            weights_list[0] if len(weights_list) == 1 else weights_list
+        )  # saved in onnx model metadata
+        self._det_models = nn.ModuleList(
+            [ObjectsModel(get_weights_path(w), device=device, fp16=fp16, fuse=fuse) for w in weights_list]
+        )
+
+        # First model drives device, stride, and preprocessing
+        self.obj_det = self._det_models[0]
         self.device = self.obj_det.device
         self.fp16 = fp16
         self.stride = self.obj_det.stride
-        self.names = self.obj_det.names
-        self.imgsz = imgsz
-        self.infsz = infsz if infsz is not None else imgsz
-
-        # keep track of hooks
+        self.imgsz = transform_sz(imgsz)
+        self.infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
         self.hooks = {}
-
-        # Scaling in Padding Preprocessing
         self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
 
-        LOGGER.debug(
-            f"SeaYOLO model info: "
-            f"model.type={type(self.obj_det.model).__name__}, "
-            f"save={self.obj_det.save}, "
-            f"stride={self.obj_det.stride}"
+        models_id2name: List[Dict[int, str]] = [m.names for m in self._det_models]
+        self.names, self._merge_mappings = _merge_class_names(models_id2name)
+        self._n_shared_cols = self.N_FIXED_COLS + len(self.names)
+        # Precompute gather index for vectorized merge (see _merge_detections).
+        gather_index, self._max_local_cols = _build_ensemble_gather_index(
+            self._merge_mappings,
+            self.N_FIXED_COLS,
         )
+        self.register_buffer("_gather_col_index", gather_index)  # moves to device with model
 
-    def load_obj_det(
-        self, weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
-    ):
-        """Load object detection model."""
-        return ObjectsModel(weights, device=device, fp16=fp16, fuse=fuse)
+        if len(self._det_models) > 1:
+            LOGGER.info(f"YOLO ensemble: {len(self._det_models)} models, merged classes={self.names}")
 
     def forward(self, x, profile=False, visualize=False):
-        """Forward pass through model.
-        
-        Returns detections.
+        """Run all models on input and merge their detections into one tensor."""
+        preds = [m(x, profile, visualize) for m in self._det_models]
+        det_tensors = [p[0] if isinstance(p, tuple) else p for p in preds]
+        return (det_tensors[0],) if len(det_tensors) == 1 else (self._merge_detections(det_tensors),)
+
+    def _merge_detections(self, det_tensors: List[torch.Tensor]) -> torch.Tensor:
+        """Merge per-model detection tensors into one with class columns remapped to shared space.
+
+        Pads each model to (batch, max_dets, max_local_cols), stacks, gathers columns via
+        prebuilt index (zeros for missing classes), then flattens to (batch, n_models * max_dets, total_cols).
+
+        Args:
+            det_tensors: One tensor per model, each (batch, num_dets, 5 + local_classes).
+
+        Returns:
+            Single tensor (batch, total_dets, 5 + shared_classes).
         """
-        return self.obj_det(x, profile, visualize)
+        batch, n_models = det_tensors[0].shape[0], len(det_tensors)
+        max_dets = max(det.shape[1] for det in det_tensors)
+        n_shared_cols = self._n_shared_cols
+
+        # Pad to (batch, max_dets, max_local_cols); trailing zeros + missing-class column yield 0.
+        padded = [
+            torch.nn.functional.pad(det, (0, self._max_local_cols - det.shape[2], 0, max_dets - det.shape[1]), value=0)
+            for det in det_tensors
+        ]
+        stacked = torch.stack(padded, dim=1)  # (B, n_models, max_dets, max_local_cols)
+
+        gather_index = (
+            self._gather_col_index.unsqueeze(0)  # (1, n_models, n_shared_cols)
+            .unsqueeze(2)  # (1, n_models, 1, n_shared_cols)
+            .expand(batch, n_models, max_dets, n_shared_cols)  # (B, n_models, max_dets, n_shared_cols)
+        )
+        out = torch.gather(stacked, dim=3, index=gather_index)
+        return out.reshape(batch, n_models * max_dets, n_shared_cols)
 
     def register_preprocessing_hook(self):
         """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
@@ -440,7 +467,7 @@ class SeaYOLO(nn.Module):
         if imgsz == infsz or infsz is None:
             return None, None
 
-        pad_left, pad_right, pad_top, pad_bottom = SeaYOLO.get_padding_for_aspect_ratio(imgsz, infsz)
+        pad_left, pad_right, pad_top, pad_bottom = YOLO.get_padding_for_aspect_ratio(imgsz, infsz)
         ratio = max(imgsz[0] / infsz[0], imgsz[1] / infsz[1])
         ratio_pad = [[1 / ratio], [pad_left, pad_top]]  # [[gain], [pad_x, pad_y]] for scale_boxes
         transform = transforms.Compose([])
@@ -503,20 +530,17 @@ class SeaYOLO(nn.Module):
                 x = x.float()
                 x = module.transform(x)
             x = x.half() if module.fp16 else x.float()
-            x = x / 255.0  # 0-255 to 0.0-1.0
+            x = x / 255  # 0-255 to 0.0-1.0
             return x
 
         return tuple(_preprocess(inp) for inp in inputs)
 
     @staticmethod
-    def _postprocessing_hook(module, inputs, outputs):
+    def _postprocessing_hook(module, _inputs, detections):
         """Convert outputs to float (if needed) and scale back boxes if transform was applied."""
 
         def _to_float(x):
             return x.float() if module.fp16 else x
-
-        # outputs is the detection tuple from forward method
-        detections = outputs
 
         # Scale back boxes if transform was applied
         if module.ratio_pad is not None:
@@ -530,22 +554,17 @@ class SeaYOLO(nn.Module):
         return detections
 
     def prepare_for_export(self, dynamic: bool = False):
-        """Prepare model for export."""
-        LOGGER.info(f"✨ Preparing {self.obj_det.__class__.__name__} for export...")
-        self.obj_det.prepare_for_export(dynamic)
+        """Prepare model(s) for export."""
+        LOGGER.info(f"✨ Preparing {self.__class__.__name__} for export...")
+        for m in self._det_models:
+            m.prepare_for_export(dynamic)
 
 
-class AHOY(SeaYOLO):
-    """Base class for AHOY models that extends SeaYOLO with horizon detection.
+class AHOY(YOLO):
+    """Base class for AHOY models that extends YOLO with horizon detection.
 
-    AHOY Stands for the following:
-    - **A**
-    - **H**orizon and
-    - **O**bject detection
-    - **Y**olo-based model
-    
-    This class inherits all preprocessing, hook management, and transform logic
-    from SeaYOLO and adds horizon detection capabilities.
+    AHOY: **A** **H**orizon and **O**bject detection **Y**OLO-based model.
+    Inherits preprocessing, hook management, and transform logic from YOLO.
     """
 
     def __new__(cls, hor_det_weights: str, **kwargs):
@@ -559,7 +578,7 @@ class AHOY(SeaYOLO):
             An instance of either AHOYv1 or AHOYv2 based on the model path.
         """
 
-        if is_obb_weights(hor_det_weights):
+        if is_obb_weights(get_weights_path(hor_det_weights)):
             return super().__new__(AHOYv2)
         return super().__new__(AHOYv1)
 
@@ -567,14 +586,14 @@ class AHOY(SeaYOLO):
         self,
         obj_det_weights: str,
         hor_det_weights: str,
-        device: Union[str, torch.device] = None,  # automatically select device
+        device: Union[str, torch.device] = "",  # automatically select device
         fp16: bool = False,
         fuse: bool = True,  # fuse conv and bn layers
-        imgsz: Tuple[int, int] = (640, 640),
-        infsz: Optional[Tuple[int, int]] = None,
+        imgsz: int | Tuple[int, int] = 640,
+        infsz: int | Tuple[int, int] | None = None,
     ):
         """Initialize AHOY model with object detection and horizon detection.
-        
+
         Args:
             obj_det_weights: Path to object detection model weights
             hor_det_weights: Path to horizon detection model weights
@@ -587,17 +606,17 @@ class AHOY(SeaYOLO):
         """
         # Initialize parent YOLO class with object detection weights
         super().__init__(
-            obj_det_weights=obj_det_weights,
+            weights=obj_det_weights,
             device=device,
             fp16=fp16,
             fuse=fuse,
             imgsz=imgsz,
             infsz=infsz,
         )
-        
+
         # Load horizon detection model
-        self.hor_det_weights = hor_det_weights
-        self.hor_det = self.load_hor_det(self.hor_det_weights, device=device, fp16=fp16, fuse=fuse)
+        self.hor_det_weights = hor_det_weights  # saved in onnx model metadata
+        self.hor_det = self.load_hor_det(get_weights_path(self.hor_det_weights), device=device, fp16=fp16, fuse=fuse)
 
         LOGGER.debug(
             f"Object detection model info: "
@@ -763,154 +782,6 @@ class DAN(nn.Module):
         self.model_b.register_io_hooks()
 
 
-class Hydra(BaseModel):
-    """
-    Model with two heads: object detection and horizon detection.
-    HydraModel is a wrapper around YOLOv5 DetectionModel.
-    In Greek mythology, Hydra is a serpent-like monster with many heads.
-    """
-
-    def __init__(
-        self,
-        weights: str = "yolov5n.pt",
-        nc_pitch: int = 500,
-        nc_theta: int = 500,
-        device: Union[str, torch.device] = None,  # automatically select device
-        cutoff: int = None,
-        fp16: bool = False,
-        task: str = "both",  # "detection", "horizon", "both"
-    ):
-        """
-        NOTE: Not tested!!!
-        Multi-task model with object detection and horizon detection.
-        backbone --> neck --> detection heads
-                 └-> classification heads for pitch and theta
-
-        Args:
-            model (DetectionModel): YOLOv5 model
-            nc_pitch (int, optional): number of classes for pitch classification. Defaults to 500.
-            nc_theta (int, optional): number of classes for theta classification. Defaults to 500.
-            device (str, optional): device to run model on. Defaults to ''.
-            cutoff (int, optional): cutoff layer for classification heads.
-                If not specified, the SPPF layer is used as cutoff. Defaults to None.
-            task (str, optional): task to run. Defaults to "both".
-                Possible values: "detection", "horizon", "both"
-        """
-        super().__init__()
-
-        assert weights is not None, "weights must be specified"
-        assert isinstance(nc_pitch, int), "nc_pitch must be an integer"
-        assert isinstance(nc_theta, int), "nc_theta must be an integer"
-        assert isinstance(fp16, bool), "fp16 must be a boolean"
-        assert task in [
-            "detection",
-            "horizon",
-            "both",
-        ], "task must be one of 'detection', 'horizon', 'both'"
-
-        self.nc_pitch = nc_pitch
-        self.nc_theta = nc_theta
-        self.device = select_device(device)
-        self.fp16 = fp16
-        self.task = task
-
-        if Path(weights).is_file() or weights.endswith(".pt"):
-            model = attempt_load(weights, device="cpu", fuse=False)
-            LOGGER.info(f"Loaded weights from {weights}")
-        else:
-            raise ValueError("model must be a path to a .pt file")
-
-        if isinstance(model, DetectionModel):
-            LOGGER.warning("WARNING ⚠️ converting YOLOv5 DetectionModel to HorizonModel")
-            self.cutoff = _find_cutoff(model) if cutoff is None else cutoff
-            self._add_classification_heads(model, self.cutoff)  # inplace modification
-
-        self.model = model.model
-        self.model.to(self.device)
-        if self.fp16:
-            self.model.half()
-        else:
-            self.model.float()
-        self.save = model.save
-        self.stride = model.stride
-        self.nc = model.nc
-
-    def _add_classification_heads(self, model: DetectionModel, cutoff: int):
-        if isinstance(model, DetectMultiBackend):
-            model = model.model  # unwrap DetectMultiBackend
-
-        c_pitch, c_theta = _get_classification_heads(model, cutoff, self.nc_pitch, self.nc_theta)
-        model.save = set(list(model.save + [cutoff]))  # add cutoff to save
-
-        # add classification heads to model
-        model.model.add_module(c_pitch.i, c_pitch)
-        model.model.add_module(c_theta.i, c_theta)
-
-    def _horizon_once(self, x, profile=False, visualize=False):
-        x_pitch, x_theta = None, None
-        y, dt = [], []  # outputs
-        for m in self.model:
-            if isinstance(m.i, int) and m.i > self.cutoff:
-                continue
-            if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-            if profile:
-                self._profile_one_layer(m, x, dt)
-            if m.type == "models.common.Classify" and "pitch" in m.i:
-                x_pitch = m(x)
-            elif m.type == "models.common.Classify" and "theta" in m.i:
-                x_theta = m(x)
-            else:  # object detection flow
-                x = m(x)  # run
-                y.append(x if m.i in self.save else None)  # save output
-                if visualize:
-                    feature_visualization(x, m.type, m.i, save_dir=visualize)
-
-        return (x_pitch, x_theta)
-
-    def _detect_once(self, x, profile=False, visualize=False):
-        y, dt = [], []  # outputs
-        for m in self.model:
-            if m.type == "models.common.Classify":
-                continue
-            if profile:
-                self._profile_one_layer(m, x, dt)
-            if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-            x = m(x)  # run
-            y.append(x if m.i in self.save else None)  # save output
-            if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
-        return x
-
-    def _forward_once(self, x, profile=False, visualize=False):
-        x_pitch, x_theta = None, None
-        y, dt = [], []  # outputs
-        for m in self.model:
-            if m.f != -1:  # if not from previous layer
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-            if profile:
-                self._profile_one_layer(m, x, dt)
-            if m.type == "models.common.Classify" and "pitch" in m.i:
-                x_pitch = m(x)
-            elif m.type == "models.common.Classify" and "theta" in m.i:
-                x_theta = m(x)
-            else:  # object detection flow
-                x = m(x)  # run
-                y.append(x if m.i in self.save else None)  # save output
-                if visualize:
-                    feature_visualization(x, m.type, m.i, save_dir=visualize)
-
-        return (x, x_pitch, x_theta)
-
-    def forward(self, x, profile=False, visualize=False):
-        if self.task == "detection":
-            return self._detect_once(x, profile, visualize)
-        if self.task == "horizon":
-            return self._horizon_once(x, profile, visualize)
-        return self._forward_once(x, profile, visualize)
-
-
 def _find_cutoff(model):
     """Find cutoff layer for classification heads."""
     for i, m in enumerate(model.model):
@@ -938,3 +809,66 @@ def _get_classification_heads(model, cutoff, nc_pitch, nc_theta):
     c_theta.i, c_theta.f, c_theta.type = "c_theta", cutoff, "models.common.Classify"
 
     return c_pitch, c_theta
+
+
+def _merge_class_names(
+    models_id2name: Sequence[Dict[int, str]],
+) -> Tuple[Dict[int, str], List[Dict[int, int]]]:
+    """Build a shared class vocabulary from per-model class dicts, deduplicating by name (case-insensitive).
+
+    First occurrence of each class name wins; order follows the order models are processed.
+
+    Args:
+        models_id2name: One dict per model, each mapping local class index → class name.
+
+    Returns:
+        shared_id2name: Shared index → class name (e.g. {0: "person", 1: "car", ...}).
+        mappings: One dict per model: local class index → shared class index.
+    """
+    shared: List[str] = []
+    seen: Dict[str, int] = {}  # lowercase name → shared index
+    for id2name in models_id2name:
+        for name in id2name.values():
+            key = name.lower()
+            if key not in seen:
+                seen[key] = len(shared)
+                shared.append(name)
+
+    mappings = [{local_idx: seen[name.lower()] for local_idx, name in id2name.items()} for id2name in models_id2name]
+    return dict(enumerate(shared)), mappings
+
+
+def _build_ensemble_gather_index(
+    merge_mappings: List[Dict[int, int]],
+    n_fixed_cols: int,
+) -> Tuple[torch.Tensor, int]:
+    """Build gather index to remap each model's output columns into the shared class space.
+
+    Fixed columns (x1, y1, x2, y2, conf) pass through; class columns use per-model local→shared
+    mapping; missing classes read from a zero-filled column.
+
+    Args:
+        merge_mappings: Per-model dicts mapping local class index → shared class index.
+        n_fixed_cols: Number of fixed columns before class scores (e.g. 5).
+
+    Returns:
+        index: Shape (n_models, n_fixed_cols + n_shared_classes).
+        max_local_cols: Max model width + 1 (extra column is zero-filled for missing classes).
+    """
+    all_shared_indices = chain.from_iterable(m.values() for m in merge_mappings)
+    n_shared = 1 + max(all_shared_indices, default=-1)
+    max_local_cols = 1 + max(n_fixed_cols + len(m) for m in merge_mappings)
+    missing_class_offset = (
+        max_local_cols - 1 - n_fixed_cols
+    )  # column offset when model has no class for that shared index
+
+    index_rows = []
+    for mapping in merge_mappings:
+        shared_to_local = {v: k for k, v in mapping.items()}
+        row = list(range(n_fixed_cols)) + [
+            n_fixed_cols + shared_to_local.get(shared_class_idx, missing_class_offset)
+            for shared_class_idx in range(n_shared)
+        ]
+        index_rows.append(row)
+
+    return torch.tensor(index_rows, dtype=torch.long), max_local_cols
