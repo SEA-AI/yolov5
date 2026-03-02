@@ -1,3 +1,4 @@
+from itertools import chain
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
@@ -11,10 +12,10 @@ from ultralytics.nn.tasks import BaseModel as UBaseModel
 from models.common import Classify, DetectMultiBackend
 from models.experimental import attempt_load
 from models.yolo import BaseModel, Detect, DetectionModel
+from utils.export import get_weights_path, transform_sz
 from utils.general import LOGGER, scale_boxes
 from utils.plots import feature_visualization
 from utils.torch_utils import is_obb_weights, select_device
-from utils.export import get_weights_path, transform_sz
 
 
 class OBBModel(UBaseModel):
@@ -353,7 +354,7 @@ class YOLO(nn.Module):
     - Two or more weights: ensemble (same input to all, merged output with shared class space).
     """
 
-    BBOX_CONF_COLS = 5  # x1, y1, x2, y2, confidence
+    N_FIXED_COLS = 5  # x1, y1, x2, y2, confidence
 
     def __init__(
         self,
@@ -384,16 +385,18 @@ class YOLO(nn.Module):
         self.hooks = {}
         self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
 
-        models_classes: List[Dict[int, str]] = [m.names for m in self._det_models]
-        shared_classes, self._merge_mappings = _merge_class_names(models_classes)
-        self.names = dict(enumerate(shared_classes))  # index → name for compatibility
-        if len(self._det_models) > 1:
-            LOGGER.info(f"YOLO ensemble: {len(self._det_models)} models, merged classes={shared_classes}")
-
-        LOGGER.debug(
-            f"YOLO model info: model.type={type(self.obj_det.model).__name__}, "
-            f"save={self.obj_det.save}, stride={self.obj_det.stride}"
+        models_id2name: List[Dict[int, str]] = [m.names for m in self._det_models]
+        self.names, self._merge_mappings = _merge_class_names(models_id2name)
+        self._n_shared_cols = self.N_FIXED_COLS + len(self.names)
+        # Precompute gather index for vectorized merge (see _merge_detections).
+        gather_index, self._max_local_cols = _build_ensemble_gather_index(
+            self._merge_mappings,
+            self.N_FIXED_COLS,
         )
+        self.register_buffer("_gather_col_index", gather_index)  # moves to device with model
+
+        if len(self._det_models) > 1:
+            LOGGER.info(f"YOLO ensemble: {len(self._det_models)} models, merged classes={self.names}")
 
     def forward(self, x, profile=False, visualize=False):
         """Run all models on input and merge their detections into one tensor."""
@@ -402,24 +405,35 @@ class YOLO(nn.Module):
         return (det_tensors[0],) if len(det_tensors) == 1 else (self._merge_detections(det_tensors),)
 
     def _merge_detections(self, det_tensors: List[torch.Tensor]) -> torch.Tensor:
-        """Merge all models' detections into one tensor (shared class indices)."""
-        bbox_conf = self.BBOX_CONF_COLS
-        batch_size = det_tensors[0].shape[0]
-        total_dets = sum(d.shape[1] for d in det_tensors)
-        total_cols = bbox_conf + len(self.names)
-        merged = torch.zeros(
-            (batch_size, total_dets, total_cols),
-            device=det_tensors[0].device,
-            dtype=det_tensors[0].dtype,
+        """Merge per-model detection tensors into one with class columns remapped to shared space.
+
+        Pads each model to (batch, max_dets, max_local_cols), stacks, gathers columns via
+        prebuilt index (zeros for missing classes), then flattens to (batch, n_models * max_dets, total_cols).
+
+        Args:
+            det_tensors: One tensor per model, each (batch, num_dets, 5 + local_classes).
+
+        Returns:
+            Single tensor (batch, total_dets, 5 + shared_classes).
+        """
+        batch, n_models = det_tensors[0].shape[0], len(det_tensors)
+        max_dets = max(det.shape[1] for det in det_tensors)
+        n_shared_cols = self._n_shared_cols
+
+        # Pad to (batch, max_dets, max_local_cols); trailing zeros + missing-class column yield 0.
+        padded = [
+            torch.nn.functional.pad(det, (0, self._max_local_cols - det.shape[2], 0, max_dets - det.shape[1]), value=0)
+            for det in det_tensors
+        ]
+        stacked = torch.stack(padded, dim=1)  # (B, n_models, max_dets, max_local_cols)
+
+        gather_index = (
+            self._gather_col_index.unsqueeze(0)  # (1, n_models, n_shared_cols)
+            .unsqueeze(2)  # (1, n_models, 1, n_shared_cols)
+            .expand(batch, n_models, max_dets, n_shared_cols)  # (B, n_models, max_dets, n_shared_cols)
         )
-        offset = 0
-        for dets, mapping in zip(det_tensors, self._merge_mappings):
-            n = dets.shape[1]
-            merged[:, offset : offset + n, :bbox_conf] = dets[:, :, :bbox_conf]
-            for local_idx, shared_idx in mapping.items():
-                merged[:, offset : offset + n, bbox_conf + shared_idx] = dets[:, :, bbox_conf + local_idx]
-            offset += n
-        return merged
+        out = torch.gather(stacked, dim=3, index=gather_index)
+        return out.reshape(batch, n_models * max_dets, n_shared_cols)
 
     def register_preprocessing_hook(self):
         """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
@@ -795,23 +809,63 @@ def _get_classification_heads(model, cutoff, nc_pitch, nc_theta):
 
 
 def _merge_class_names(
-    models_classes: Sequence[Dict[int, str]],
-) -> Tuple[List[str], List[Dict[int, int]]]:
-    """
-    Merge per-model class name dicts into one shared list, deduplicating case-insensitively.
-    Returns the shared class list and, per model, a mapping of local → shared index.
+    models_id2name: Sequence[Dict[int, str]],
+) -> Tuple[Dict[int, str], List[Dict[int, int]]]:
+    """Build a shared class vocabulary from per-model class dicts, deduplicating by name (case-insensitive).
+
+    First occurrence of each class name wins; order follows the order models are processed.
+
+    Args:
+        models_id2name: One dict per model, each mapping local class index → class name.
+
+    Returns:
+        shared_id2name: Shared index → class name (e.g. {0: "person", 1: "car", ...}).
+        mappings: One dict per model: local class index → shared class index.
     """
     shared: List[str] = []
     seen: Dict[str, int] = {}  # lowercase name → shared index
-    mappings: List[Dict[int, int]] = []
-
-    for local_names in models_classes:
-        mapping: Dict[int, int] = {}
-        for local_idx, name in local_names.items():
-            if name.lower() not in seen:
-                seen[name.lower()] = len(shared)
+    for id2name in models_id2name:
+        for name in id2name.values():
+            key = name.lower()
+            if key not in seen:
+                seen[key] = len(shared)
                 shared.append(name)
-            mapping[local_idx] = seen[name.lower()]
-        mappings.append(mapping)
 
-    return shared, mappings
+    mappings = [{local_idx: seen[name.lower()] for local_idx, name in id2name.items()} for id2name in models_id2name]
+    return dict(enumerate(shared)), mappings
+
+
+def _build_ensemble_gather_index(
+    merge_mappings: List[Dict[int, int]],
+    n_fixed_cols: int,
+) -> Tuple[torch.Tensor, int]:
+    """Build gather index to remap each model's output columns into the shared class space.
+
+    Fixed columns (x1, y1, x2, y2, conf) pass through; class columns use per-model local→shared
+    mapping; missing classes read from a zero-filled column.
+
+    Args:
+        merge_mappings: Per-model dicts mapping local class index → shared class index.
+        n_fixed_cols: Number of fixed columns before class scores (e.g. 5).
+
+    Returns:
+        index: Shape (n_models, n_fixed_cols + n_shared_classes).
+        max_local_cols: Max model width + 1 (extra column is zero-filled for missing classes).
+    """
+    all_shared_indices = chain.from_iterable(m.values() for m in merge_mappings)
+    n_shared = 1 + max(all_shared_indices, default=-1)
+    max_local_cols = 1 + max(n_fixed_cols + len(m) for m in merge_mappings)
+    missing_class_offset = (
+        max_local_cols - 1 - n_fixed_cols
+    )  # column offset when model has no class for that shared index
+
+    index_rows = []
+    for mapping in merge_mappings:
+        shared_to_local = {v: k for k, v in mapping.items()}
+        row = list(range(n_fixed_cols)) + [
+            n_fixed_cols + shared_to_local.get(shared_class_idx, missing_class_offset)
+            for shared_class_idx in range(n_shared)
+        ]
+        index_rows.append(row)
+
+    return torch.tensor(index_rows, dtype=torch.long), max_local_cols
