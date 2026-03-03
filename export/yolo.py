@@ -1,14 +1,16 @@
 """
 Export YOLO to ONNX format.
 
-ONNX is an open standard for machine learning models that enables interoperability 
+ONNX is an open standard for machine learning models that enables interoperability
 between different frameworks and platforms.
 https://onnx.ai/
 
 The exported ONNX model can be used with various inference engines and accelerators,
 including TensorRT for optimized GPU inference.
 
-Example:
+One argument controls the model: --det-weights. One path = single model; two or more = ensemble (same input, fused outputs with class alignment).
+
+Example (YOLO - single model):
     # Using local weights files:
     python export/yolo.py \
         --det_weights yolov5n.pt \
@@ -28,24 +30,36 @@ Example:
         --half \
         --fname yolo.onnx
 
+Example (ensemble - multiple models with class alignment):
+    # Combine primary and secondary models with proper class alignment:
+    python export/yolo.py \
+        --det_weights yolov5m.pt yolov5n.pt \
+        --imgsz 640 \
+        --batch-size 2 \
+        --fuse \
+        --half \
+        --fname oneberry_yolo.onnx
+
 NOTE: For TensorRT 7 compatible models, use the --trt7-compatible flag.
 """
 
 import argparse
 import sys
 from pathlib import Path
-from typing import Tuple
+from typing import List, Tuple
+
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 
-from utils.export import export_model_to_onnx, get_weights_path, transform_sz
-from models.custom import SeaYOLO
+from utils.export import export_model_to_onnx
+from models.custom import YOLO
+
 
 def main(
-    det_weights: str,
+    det_weights: List[str],
     imgsz: int | Tuple[int, int],
     infsz: int | Tuple[int, int] | None,
     batch_size: int,
@@ -56,27 +70,23 @@ def main(
     trt7_compatible: bool = False,
     fname: str = "",
 ):
-    """Export the YOLO model to ONNX format."""
-    # Transform image size to (height, width) format
-    imgsz = transform_sz(imgsz)
-    infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
-    det_weights = get_weights_path(det_weights)
-
-    model = SeaYOLO(
-        obj_det_weights=det_weights,
+    """Export the YOLO model to ONNX format. One or more weights → single YOLO (ensemble if multiple)."""
+    model = YOLO(
+        weights=det_weights,
         fp16=half,
         fuse=fuse,
         imgsz=imgsz,
         infsz=infsz,
     )
 
+    # Export to ONNX
     export_model_to_onnx(
         model=model,
-        imgsz=imgsz,
+        imgsz=model.imgsz,
         batch_size=batch_size,
         fname=fname,
         dynamic=dynamic,
-        simplify=simplify,
+        simplify=True if len(det_weights) > 1 else simplify,  # onnx2torch might complain otherwise
         trt7_compatible=trt7_compatible,
     )
 
@@ -86,9 +96,10 @@ def _parse_args():
     parser.add_argument(
         "-dw",
         "--det-weights",
-        type=str,
+        nargs="+",
         required=True,
-        help="Path to the object detection model weights or W&B artifact (e.g., 'YOLOv5n-IR:latest').",
+        metavar="WEIGHTS",
+        help="One or more weight paths (or W&B artifacts). One = single model; two or more = ensemble (fused outputs).",
     )
     parser.add_argument("-sz", "--imgsz", nargs="+", type=int, default=[640, 640], help="image input shape (h, w)")
     parser.add_argument(
@@ -148,4 +159,3 @@ def _parse_args():
 if __name__ == "__main__":
     args = _parse_args()
     main(**vars(args))
-

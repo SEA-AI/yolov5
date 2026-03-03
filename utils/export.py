@@ -6,15 +6,18 @@ to minimize code duplication.
 """
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, TYPE_CHECKING
 
 import torch
 
 from export import export_onnx, export_onnx_trt7_compatible
 from utils.general import LOGGER
 
+if TYPE_CHECKING:
+    from models.custom import YOLO, AHOY
 
-def get_weights_path(weights_path: str) -> str:
+
+def get_weights_path(weights_path: str) -> str | None:
     """Get model weights from local path or W&B registry/run.
 
     Args:
@@ -38,30 +41,27 @@ def get_weights_path(weights_path: str) -> str:
 
     api = wandb.Api()
 
-    # Try registry first (format: collection:version)
+    # Build candidates: registry (collection:version) first, then run artifact path
+    candidates = []
     if ":" in weights_path and "/" not in weights_path.split(":")[0]:
-        try:
-            collection, version = weights_path.split(":")
-            artifact_name = f"wandb-registry-model/{collection}:{version}"
-            LOGGER.info(f"Attempting to download from registry: {artifact_name}")
+        candidates.append((f"wandb-registry-model/{weights_path}", "registry"))
+    candidates.append((weights_path, "run"))
 
-            artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
-            return str(next(Path(artifact_path).glob("*.pt")))
-
-        except Exception as e:
-            LOGGER.warning(f"Failed to download from registry: {e}")
-
-    # Try as direct run artifact (format: entity/project/artifact:version)
-    try:
-        LOGGER.info(f"Attempting to download as run artifact: {weights_path}")
-        artifact_path = api.artifact(name=weights_path).download(
-            root=Path("artifacts", weights_path.replace("/", "_").replace(":", "_"))
-        )
+    for artifact_name, kind in candidates:
+        LOGGER.info(f"Attempting to download from {kind}: {artifact_name}")
+        artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
         return str(next(Path(artifact_path).glob("*.pt")))
 
-    except Exception as e:
-        LOGGER.error(f"Failed to download from W&B run: {e}")
-        raise e
+    for artifact_name, kind in candidates:
+        try:
+            artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
+            artifact_path = str(next(Path(artifact_path).glob("*.pt")))
+            LOGGER.info(f"Successfully downloaded {kind}: {artifact_name}")
+            return artifact_path
+        except Exception as e:
+            LOGGER.warning(f"Download failed for {artifact_name} ({kind}): {e}")
+
+    return None
 
 
 def transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
@@ -86,8 +86,9 @@ def transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
         raise ValueError(f"imgsz must be int or a list/tuple of 1 or 2 elements, got {imgsz}")
     return imgsz[0], imgsz[-1]
 
+
 def export_model_to_onnx(
-    model,
+    model: "YOLO | AHOY",
     imgsz: Tuple[int, int],
     batch_size: int,
     fname: str,
@@ -116,7 +117,10 @@ def export_model_to_onnx(
 
     if not fname:
         input_size = f"{imgsz[0]}x{imgsz[1]}"
-        fname = f"{type(model).__name__.lower()}_b{batch_size}_sz{input_size}.onnx"
+        base = f"{type(model).__name__.lower()}"
+        if isinstance(model.obj_det_weights, list) and len(model.obj_det_weights) > 1:
+            base = f"{base}ensemble"
+        fname = f"{base}_b{batch_size}_sz{input_size}.onnx"
     LOGGER.info(f"🚀 Exporting model {type(model).__name__} to {fname}...")
 
     model.prepare_for_export(dynamic=dynamic)
@@ -139,6 +143,5 @@ def export_model_to_onnx(
         simplify=simplify,
         opset=12,
     )
-    
-    return result
 
+    return result

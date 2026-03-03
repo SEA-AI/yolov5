@@ -54,6 +54,7 @@ import subprocess
 import sys
 import time
 import warnings
+from typing import List, Union
 from pathlib import Path
 
 import pandas as pd
@@ -325,12 +326,12 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
     check_requirements(("onnx>=1.12.0", "onnxscript"))
     import onnx
 
-    from models.custom import AHOY, DAN, AHOYv1, AHOYv2
+    from models.custom import AHOY, AHOYv1, AHOYv2, DAN, YOLO
 
     LOGGER.info(f"\n{prefix} starting export with onnx {onnx.__version__}...")
     f = str(file.with_suffix(".onnx"))
 
-    if isinstance(model,(SegmentationModel, AHOYv2)):
+    if isinstance(model, (SegmentationModel, AHOYv2)):
         input_names = ["images"]
         output_names = ["output0", "output1"]
     elif isinstance(model, AHOYv1):
@@ -379,8 +380,14 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
             "stride": [int(max(model.model_a.stride)), int(max(model.model_b.stride))],
             "names": [model.model_a.names, model.model_b.names],
             "resize": resize_info if any(resize_info) else None,
-            "det_weights": [getattr(model.model_a, "obj_det_weights", None), getattr(model.model_b, "obj_det_weights", None)],
-            "hor_weights": [getattr(model.model_a, "hor_det_weights", None), getattr(model.model_b, "hor_det_weights", None)],
+            "det_weights": [
+                getattr(model.model_a, "obj_det_weights", None),
+                getattr(model.model_b, "obj_det_weights", None),
+            ],
+            "hor_weights": [
+                getattr(model.model_a, "hor_det_weights", None),
+                getattr(model.model_b, "hor_det_weights", None),
+            ],
         }
     else:
         d = {
@@ -390,7 +397,7 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
             "det_weights": getattr(model, "obj_det_weights", None),
             "hor_weights": getattr(model, "hor_det_weights", None),
         }
-        
+
     for k, v in {k: v for k, v in d.items() if v}.items():
         meta = model_onnx.metadata_props.add()
         meta.key, meta.value = k, str(v)
@@ -642,7 +649,7 @@ def export_onnx_trt7_compatible(model, im, file, dynamic, simplify, opset=12, pr
         from pathlib import Path
         import torch
         from models.yolo import Model
-        
+
         model = Model(cfg)  # Create YOLOv5 model
         im = torch.zeros((1, 3, 640, 640))  # Example input
         file = Path('model_trt7.onnx')
@@ -650,26 +657,36 @@ def export_onnx_trt7_compatible(model, im, file, dynamic, simplify, opset=12, pr
         ```
     """
     LOGGER.info(f"\n{prefix} exporting TensorRT 7 compatible ONNX...")
-    from models.custom import AHOY, DAN
-    if isinstance(model, AHOY):
-        grid = model.obj_det.model[-1].anchor_grid
-        model.obj_det.model[-1].anchor_grid = [a[..., :1, :1, :] for a in grid]
+    from models.custom import AHOY, DAN, YOLO
+
+    def _wrap_anchor_grid(model: Union[YOLO, AHOY]):
+        grids = []
+        for m in model._det_models:
+            grids.append(m.model[-1].anchor_grid)
+            m.model[-1].anchor_grid = [a[..., :1, :1, :] for a in m.model[-1].anchor_grid]
+        return grids
+
+    def _unwrap_anchor_grid(model: Union[YOLO, AHOY], grids: List[List[torch.Tensor]]):
+        for m, grid in zip(model._det_models, grids):
+            m.model[-1].anchor_grid = grid
+
+    if isinstance(model, (YOLO, AHOY)):
+        grids = _wrap_anchor_grid(model)
         export_onnx(model, im, file, opset, dynamic, simplify)  # opset 12
-        model.obj_det.model[-1].anchor_grid = grid
+        _unwrap_anchor_grid(model, grids)
     elif isinstance(model, DAN):
-        grid_a = model.model_a.obj_det.model[-1].anchor_grid
-        model.model_a.obj_det.model[-1].anchor_grid = [a[..., :1, :1, :] for a in grid_a]
-        grid_b = model.model_b.obj_det.model[-1].anchor_grid
-        model.model_b.obj_det.model[-1].anchor_grid = [a[..., :1, :1, :] for a in grid_b]
+        grids_a = _wrap_anchor_grid(model.model_a)
+        grids_b = _wrap_anchor_grid(model.model_b)
         export_onnx(model, im, file, opset, dynamic, simplify)  # opset 12
-        model.model_a.obj_det.model[-1].anchor_grid = grid_a
-        model.model_b.obj_det.model[-1].anchor_grid = grid_b
+        _unwrap_anchor_grid(model.model_a, grids_a)
+        _unwrap_anchor_grid(model.model_b, grids_b)
     else:
         grid = model.model[-1].anchor_grid
         model.model[-1].anchor_grid = [a[..., :1, :1, :] for a in grid]
         export_onnx(model, im, file, opset, dynamic, simplify)  # opset 12
         model.model[-1].anchor_grid = grid
     return str(file.with_suffix(".onnx")), model
+
 
 @try_export
 def export_engine(
@@ -710,9 +727,9 @@ def export_engine(
         ```
     """
     if isinstance(im, (list, tuple)):
-        assert all(
-            i.device.type != "cpu" for i in im
-        ), "export running on CPU but must be on GPU, i.e. `python export.py --device 0`"
+        assert all(i.device.type != "cpu" for i in im), (
+            "export running on CPU but must be on GPU, i.e. `python export.py --device 0`"
+        )
     else:
         assert im.device.type != "cpu", "export running on CPU but must be on GPU, i.e. `python export.py --device 0`"
     try:
