@@ -37,31 +37,55 @@ dataset = dataset.map_labels("ground_truth_train_det", class_map)
 
 ### Export dataset
 
-YOLOv5 uses a defined format for their dataset. Since SEA.AI uses fiftyone for data management, we need to export the dataset in the YOLOv5 format. Luckily, fiftyone has a built-in function to export the dataset in the YOLOv5 format.
+Use `scripts/fo_to_yolo.py` to export a FiftyOne dataset to YOLOv5 format with optional W&B registration.
 
-Here's a snippet of the code that exports the dataset:
-```python
-# for IR
-fo_splits = [f"TRAIN_by_sequence", f"VAL_by_sequence"]
-# for RGB
-fo_splits = [f"TRAIN_v0", f"VAL_v0"]
-
-yolo_splits = ["train", "val"]
-
-for fo_split, yolo_split in zip(fo_splits, yolo_splits):
-    split: fo.DatasetView = dataset.match_tags(fo_split)
-    split.export(
-        export_dir="path/to/export/dir",
-        dataset_type=fo.types.YOLOv5Dataset,
-        label_field="ground_truth_train_det",
-        classes=classes,
-        split=yolo_split,
-        export_media=True,
-    )
+```bash
+python scripts/fo_to_yolo.py \
+  --dataset-name "MY_DATASET" \
+  --export-dir "/home/sea-ai/Documents" \
+  --class-map "data/class_map.yaml" \
+  --split-mode split \        # split | train | val
+  --split-by trip \           # field name | random (skipped if TRAIN_/VAL_ tags already exist)
+  --noise-ratio 0.25 \        # omit to use all samples
+  --val-ratio 0.2 \
+  --wandb --wandb-entity sea-ai --wandb-org sea-ai-org --wandb-collection "MY_DATASET" \
+  --tags-suffix v0
 ```
 
-> [!note]
-> For more details on how the tags are defined, check the `fo_to_yolo.py` file in this same directory.
+- A description is prompted interactively and is **required** to proceed.
+- The output folder is `<export-dir>/<dataset-name>_<tags-suffix>/`.
+- `dataset.yaml` uses `path: .` (portable — works wherever the folder is moved or downloaded from W&B).
+- If `TRAIN_<suffix>` and `VAL_<suffix>` tags already exist on the samples, the existing split is used automatically.
+- Omit `--wandb` to skip upload entirely. Omit `--wandb-org` to upload the artifact without linking to the Dataset Registry.
+
+### Combine datasets
+
+Use `scripts/combine_datasets.py` to merge multiple exported datasets into a single self-contained dataset for training. All source datasets must share the same class list.
+
+Each entry in `--datasets` can be a local path or a W&B artifact reference — they can be mixed freely.
+
+```bash
+# Local paths
+python scripts/combine_datasets.py \
+  --datasets "/home/sea-ai/Documents/DATASET_A_v0" "/home/sea-ai/Documents/DATASET_B_v0" \
+  --output-dir "/home/sea-ai/Documents/COMBINED_v0" \
+  --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
+
+# W&B artifact refs — no local setup needed, downloaded automatically
+python scripts/combine_datasets.py \
+  --datasets "sea-ai/dataset-registry/DATASET_A:v0" "sea-ai/dataset-registry/DATASET_B:v0" \
+  --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
+```
+
+- A description is prompted interactively and is **required** to proceed.
+- Local paths and W&B artifact refs can be mixed freely.
+- `--output-dir` and `--download-dir` are optional — both default to a temp directory if not set.
+- Images and labels from all source datasets are copied into `images/` and `labels/`, prefixed with `d0_`, `d1_`, etc. to avoid filename collisions.
+- `dataset.yaml` uses `path: .` (portable — works wherever the folder is moved or downloaded from W&B).
+- The W&B artifact contains the full combined dataset (images + labels + yaml) — self-contained and usable on any machine.
+- W&B artifact entries are declared as lineage inputs in the uploaded artifact.
+- Omit `--wandb-org` to upload the artifact without linking to the Dataset Registry.
+- Pass the output YAML directly to training: `python train.py --data /path/to/combined/dataset.yaml`.
 
 ### Training IR Entrypoint
 
