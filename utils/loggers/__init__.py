@@ -289,7 +289,7 @@ class Loggers:
                 for i, name in enumerate(self.best_keys):
                     self.wandb.wandb_run.summary[name] = best_results[i]  # log best results in the summary
             self.wandb.log(x)
-            self.wandb.end_epoch()
+            self.wandb.end_epoch(best_result=best_fitness == fi)
 
         if self.clearml:
             self.clearml.current_epoch_logged_images = set()  # reset epoch image limit
