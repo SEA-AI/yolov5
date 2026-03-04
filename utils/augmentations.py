@@ -36,17 +36,17 @@ class Albumentations:
                 A.RandomResizedCrop(height=size, width=size, scale=(0.8, 1.0), ratio=(0.9, 1.11), p=0.0),
                 #A.Blur(blur_limit=3, p=0.3),
                 A.MedianBlur(p=0.01),
-                #A.GaussNoise(std_range=[0.1, 0.2], p=0.5),
-                A.MotionBlur(blur_limit=(13, 29), angle_range=(0, 0), direction_range=(-1.0, 1.0), p=hyp.get("motion_blur", 0.0) if hyp else 0.0),
+                A.GaussNoise(std_range=[0.1, 0.2], p=0.1),
+                #A.MotionBlur(blur_limit=(13, 29), angle_range=(0, 0), direction_range=(-1.0, 1.0), p=hyp.get("motion_blur", 0.0) if hyp else 0.0),
                 A.ToGray(p=0.01),
                 #A.CLAHE(clip_limit=4.0, tile_grid_size=(8, 8), p=0.5),
                 A.RandomBrightnessContrast(
-                    brightness_limit=0.4,   
-                    contrast_limit=0.4,
+                    brightness_limit=0.3,   
+                    contrast_limit=0.3,
                     brightness_by_max=True,   # Essential for thermal data
-                    p=0.4                     # High probability due to thermal variation
+                    p=0.3                     # High probability due to thermal variation
                 ),
-                A.RandomGamma(gamma_limit=(50, 200), p=0.4),
+                #A.RandomGamma(gamma_limit=(50, 200), p=0.4),
                 A.ImageCompression(p=hyp.get("compression", 0.0) if hyp else 0.0, quality_lower=50),
             ]  # transforms
             self.transform = A.Compose(T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"]))
