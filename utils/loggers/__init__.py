@@ -134,7 +134,12 @@ class Loggers:
         # W&B
         if wandb and "wandb" in self.include:
             self.opt.hyp = self.hyp  # add hyperparameters
-            self.wandb = WandbLogger(self.opt)
+            try:
+                self.wandb = WandbLogger(self.opt)
+            except Exception:
+                self.wandb = None
+                prefix = colorstr("Weights & Biases: ")
+                LOGGER.warning(f"{prefix}WARNING ⚠️ WandbLogger failed to initialize, skipping W&B logging.")
         else:
             self.wandb = None
 
@@ -284,7 +289,7 @@ class Loggers:
             self.clearml.log_scalars(x, epoch)
 
         if self.wandb:
-            if best_fitness == fi:
+            if self.wandb.wandb_run and best_fitness == fi:
                 best_results = [epoch, *vals[3:7]]
                 for i, name in enumerate(self.best_keys):
                     self.wandb.wandb_run.summary[name] = best_results[i]  # log best results in the summary
@@ -327,7 +332,7 @@ class Loggers:
             self.wandb.log(dict(zip(self.keys[3:10], results)))
             self.wandb.log({"Results": [wandb.Image(str(f), caption=f.name) for f in files]})
             # Calling wandb.log. TODO: Refactor this into WandbLogger.log_model
-            if not self.opt.evolve:
+            if not self.opt.evolve and self.wandb.wandb_run:
                 wandb.log_artifact(
                     str(best if best.exists() else last),
                     type="model",
