@@ -180,6 +180,7 @@ class WandbLogger:
             )
 
         if self.wandb_run:
+            LOGGER.info(f"{colorstr('Weights & Biases: ')}run started → {self.wandb_run.url}")
             if self.job_type == "Training":
                 if opt.upload_dataset:
                     if not opt.resume:
@@ -559,9 +560,12 @@ class WandbLogger:
         if self.wandb_run:
             if self.bbox_media_panel_images:
                 self.log_dict["BoundingBoxDebugger"] = self.bbox_media_panel_images
+            keys_to_log = list(self.log_dict.keys())
+            LOGGER.info(f"{colorstr('Weights & Biases: ')}logging epoch {self.current_epoch} → {keys_to_log}")
             try:
                 with all_logging_disabled():
                     wandb.log(self.log_dict)
+                LOGGER.info(f"{colorstr('Weights & Biases: ')}epoch {self.current_epoch} logged successfully")
             except BaseException as e:
                 LOGGER.info(
                     f"An error occurred in wandb logger. The training will proceed without interruption. More info\n{e}"

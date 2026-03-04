@@ -220,7 +220,9 @@ class Loggers:
             if ni == 10 and (self.wandb or self.clearml):
                 files = sorted(self.save_dir.glob("train*.jpg"))
                 if self.wandb:
-                    self.wandb.log({"Mosaics": [wandb.Image(str(f), caption=f.name) for f in files if f.exists()]})
+                    mosaic_files = [f for f in files if f.exists()]
+                    LOGGER.info(f"{colorstr('Weights & Biases: ')}queuing {len(mosaic_files)} mosaic image(s) for logging")
+                    self.wandb.log({"Mosaics": [wandb.Image(str(f), caption=f.name) for f in mosaic_files]})
                 if self.clearml:
                     self.clearml.log_debug_samples(files, title="Mosaics")
 
