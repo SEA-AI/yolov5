@@ -74,12 +74,20 @@ def validate_classes(yamls: list[tuple[Path, dict]]) -> list[str]:
     return yamls[0][1]["names"]  # return as-is from the source yaml
 
 
-def download_artifact(ref: str, download_dir: str) -> str:
-    """Download a W&B artifact and return its local path."""
+def download_artifact(ref: str, download_dir: str | None) -> str:
+    """Download a W&B artifact and return its local path.
+
+    If *download_dir* is None the artifact is downloaded to the W&B cache
+    (``~/.cache/wandb/artifacts/``) and the cached path is returned directly,
+    avoiding a second copy on disk.  If *download_dir* is given the artifact
+    is placed under ``<download_dir>/<artifact_name>/`` as before.
+    """
     import wandb
 
     api = wandb.Api()
     artifact = api.artifact(ref)
+    if download_dir is None:
+        return artifact.download()
     artifact_name = ref.split("/")[-1].split(":")[0]
     dest = str(Path(download_dir) / artifact_name)
     artifact.download(root=dest)
@@ -226,8 +234,7 @@ def combine_datasets(
     for entry in datasets:
         if is_wandb_ref(entry):
             if not download_dir:
-                download_dir = tempfile.mkdtemp()
-                print(f"No --download-dir set, using temp dir: {download_dir}")
+                print(f"No --download-dir set, using W&B artifact cache.")
             print(f"Downloading artifact '{entry}'...")
             local_path = download_artifact(entry, download_dir)
             print(f"  → {local_path}")
