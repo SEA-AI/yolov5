@@ -38,6 +38,7 @@ python combine_datasets.py \\
 """
 
 import argparse
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -74,13 +75,13 @@ def validate_classes(yamls: list[tuple[Path, dict]]) -> list[str]:
     return yamls[0][1]["names"]  # return as-is from the source yaml
 
 
-def download_artifact(ref: str, download_dir: str | None) -> str:
-    """Download a W&B artifact and return its local path.
+def download_artifact(ref: str, download_dir: str | None) -> tuple[str, str | None]:
+    """Download a W&B artifact and return (local_path, tmp_dir_to_cleanup).
 
     The W&B cache is always skipped (skip_cache=True). If *download_dir* is
-    None the artifact is placed under a fresh temp directory in /tmp.
-    If *download_dir* is given the artifact is placed under
-    ``<download_dir>/<artifact_name>/``.
+    None the artifact is placed under a fresh temp directory in /tmp and the
+    temp parent is returned as the second element for the caller to clean up.
+    If *download_dir* is given the second element is None.
     """
     import wandb
 
@@ -89,13 +90,14 @@ def download_artifact(ref: str, download_dir: str | None) -> str:
     artifact = api.artifact(ref)
 
     if download_dir is None:
-        dest = str(Path(tempfile.mkdtemp(dir="/tmp", prefix="wandb_")) / artifact_name)
+        tmp_parent = tempfile.mkdtemp(dir="/tmp", prefix="wandb_")
+        dest = str(Path(tmp_parent) / artifact_name)
         artifact.download(root=dest, skip_cache=True)
-        return dest
+        return dest, tmp_parent
 
     dest = str(Path(download_dir) / artifact_name)
     artifact.download(root=dest, skip_cache=True)
-    return dest
+    return dest, None
 
 
 
@@ -167,6 +169,43 @@ def register_in_wandb(
     """Upload combined dataset directory to W&B. W&B artifact entries are declared as lineage inputs."""
     import wandb
 
+    # Redirect W&B artifact cache to a temp dir so ~/.cache/wandb/artifacts
+    # does not accumulate large dataset files after each upload.
+    _prev_cache = os.environ.get("WANDB_CACHE_DIR")
+    _tmp_cache = tempfile.mkdtemp(prefix="wandb_cache_")
+    os.environ["WANDB_CACHE_DIR"] = _tmp_cache
+
+    try:
+        _do_register_in_wandb(
+            wandb=wandb,
+            output_dir=output_dir,
+            description=description,
+            dataset_dirs=dataset_dirs,
+            classes=classes,
+            wandb_refs=wandb_refs,
+            wandb_entity=wandb_entity,
+            wandb_collection=wandb_collection,
+            wandb_org=wandb_org,
+        )
+    finally:
+        shutil.rmtree(_tmp_cache, ignore_errors=True)
+        if _prev_cache is not None:
+            os.environ["WANDB_CACHE_DIR"] = _prev_cache
+        else:
+            os.environ.pop("WANDB_CACHE_DIR", None)
+
+
+def _do_register_in_wandb(
+    wandb,
+    output_dir: Path,
+    description: str,
+    dataset_dirs: list[str],
+    classes: list[str],
+    wandb_refs: list[str],
+    wandb_entity: str,
+    wandb_collection: str,
+    wandb_org: str | None,
+) -> None:
     with wandb.init(
         entity=wandb_entity,
         project="dataset-registry",
@@ -234,16 +273,19 @@ def combine_datasets(
     # --- Resolve entries: download W&B refs, keep local paths as-is ---
     local_dirs: list[str] = []
     wandb_refs: list[str] = []
+    tmp_download_dirs: list[str] = []
 
     for entry in datasets:
         if is_wandb_ref(entry):
             if not download_dir:
                 print(f"No --download-dir set, using W&B artifact cache.")
             print(f"Downloading artifact '{entry}'...")
-            local_path = download_artifact(entry, download_dir)
+            local_path, tmp_parent = download_artifact(entry, download_dir)
             print(f"  → {local_path}")
             local_dirs.append(local_path)
             wandb_refs.append(entry)
+            if tmp_parent:
+                tmp_download_dirs.append(tmp_parent)
         else:
             local_dirs.append(entry)
 
@@ -280,6 +322,11 @@ def combine_datasets(
             has_train = True
         if copy_split(dataset_dir, y, "val", output_path, prefix):
             has_val = True
+
+    # --- Cleanup temp download dirs (no longer needed after copy) ---
+    for d in tmp_download_dirs:
+        shutil.rmtree(d, ignore_errors=True)
+    tmp_download_dirs.clear()
 
     # --- Validate ---
     print("  validating combined dataset...")
