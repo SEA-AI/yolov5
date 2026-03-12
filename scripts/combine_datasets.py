@@ -23,7 +23,7 @@ Usage (W&B artifacts — no local setup needed):
 python combine_datasets.py \\
   --datasets "sea-ai/dataset-registry/DATASET_A:v0" "sea-ai/dataset-registry/DATASET_B:v1" \\
   --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
-  # artifacts are downloaded to a temp dir automatically
+  # artifacts are downloaded to a /tmp temp dir, W&B cache skipped
 
 Usage (mixed):
 python combine_datasets.py \\
@@ -31,7 +31,7 @@ python combine_datasets.py \\
   --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
 
   # --output-dir "/mnt/datasets/COMBINED"  → where the combined dataset is written (default: temp dir)
-  # --download-dir "/mnt/datasets"  → where W&B artifacts are downloaded (default: temp dir)
+  # --download-dir "/mnt/datasets"  → where W&B artifacts are downloaded (default: /tmp, cache skipped)
   # --wandb-org sea-ai-org  → also links to the Dataset Registry
   # W&B versions artifacts by content hash: a new version is only created when the combined files differ from the previous upload
   # A description will be prompted interactively and is required to proceed.
@@ -77,20 +77,24 @@ def validate_classes(yamls: list[tuple[Path, dict]]) -> list[str]:
 def download_artifact(ref: str, download_dir: str | None) -> str:
     """Download a W&B artifact and return its local path.
 
-    If *download_dir* is None the artifact is downloaded to the W&B cache
-    (``~/.cache/wandb/artifacts/``) and the cached path is returned directly,
-    avoiding a second copy on disk.  If *download_dir* is given the artifact
-    is placed under ``<download_dir>/<artifact_name>/`` as before.
+    The W&B cache is always skipped (skip_cache=True). If *download_dir* is
+    None the artifact is placed under a fresh temp directory in /tmp.
+    If *download_dir* is given the artifact is placed under
+    ``<download_dir>/<artifact_name>/``.
     """
     import wandb
 
+    artifact_name = ref.split("/")[-1].split(":")[0]
     api = wandb.Api()
     artifact = api.artifact(ref)
+
     if download_dir is None:
-        return artifact.download()
-    artifact_name = ref.split("/")[-1].split(":")[0]
+        dest = str(Path(tempfile.mkdtemp(dir="/tmp", prefix="wandb_")) / artifact_name)
+        artifact.download(root=dest, skip_cache=True)
+        return dest
+
     dest = str(Path(download_dir) / artifact_name)
-    artifact.download(root=dest)
+    artifact.download(root=dest, skip_cache=True)
     return dest
 
 
@@ -355,7 +359,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--download-dir",
         default=None,
-        help="Directory to download W&B artifacts into. Defaults to a temp directory if any entry in --datasets is a W&B artifact ref.",
+        help="Directory to download W&B artifacts into. Defaults to a /tmp temp directory (W&B cache skipped).",
     )
 
     # Weights & Biases
