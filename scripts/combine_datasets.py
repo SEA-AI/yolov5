@@ -270,63 +270,61 @@ def combine_datasets(
     if register_wandb and not wandb_entity:
         raise ValueError("--wandb-entity is required when --wandb is set.")
 
-    # --- Resolve entries: download W&B refs, keep local paths as-is ---
-    local_dirs: list[str] = []
-    wandb_refs: list[str] = []
-    tmp_download_dirs: list[str] = []
-
-    for entry in datasets:
-        if is_wandb_ref(entry):
-            if not download_dir:
-                print(f"No --download-dir set, using W&B artifact cache.")
-            print(f"Downloading artifact '{entry}'...")
-            local_path, tmp_parent = download_artifact(entry, download_dir)
-            print(f"  → {local_path}")
-            local_dirs.append(local_path)
-            wandb_refs.append(entry)
-            if tmp_parent:
-                tmp_download_dirs.append(tmp_parent)
-        else:
-            local_dirs.append(entry)
-
     # Resolve output directory
     if not output_dir:
         output_dir = tempfile.mkdtemp()
         print(f"No --output-dir set, using temp dir: {output_dir}")
 
     wandb_collection = wandb_collection or Path(output_dir).name
-
-    # --- Read and validate ---
-    print(f"\nReading {len(local_dirs)} dataset(s)...")
-    yamls: list[tuple[Path, dict]] = []
-    for d in local_dirs:
-        yaml_path = Path(d) / "dataset.yaml"
-        if not yaml_path.exists():
-            raise FileNotFoundError(f"dataset.yaml not found in '{d}'")
-        yamls.append((Path(d), yaml.safe_load(yaml_path.read_text(encoding="utf-8"))))
-        print(f"  loaded {yaml_path}")
-
-    classes = validate_classes(yamls)
-    print(f"  classes consistent across all datasets: {classes}")
-
-    # --- Copy images and labels ---
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
+    # --- Download, copy, and immediately cleanup each dataset in turn ---
+    local_dirs: list[str] = []
+    wandb_refs: list[str] = []
+    classes = None
     has_train, has_val = False, False
-    print(f"\nCopying dataset files to {output_dir}...")
-    for i, (dataset_dir, y) in enumerate(yamls):
+
+    print(f"\nProcessing {len(datasets)} dataset(s)...")
+    for i, entry in enumerate(datasets):
+        if is_wandb_ref(entry):
+            if not download_dir:
+                print(f"  No --download-dir set, downloading to /tmp.")
+            print(f"  [{i}] Downloading artifact '{entry}'...")
+            local_path, tmp_parent = download_artifact(entry, download_dir)
+            print(f"      → {local_path}")
+            wandb_refs.append(entry)
+        else:
+            local_path, tmp_parent = entry, None
+
+        local_dirs.append(local_path)
+
+        yaml_path = Path(local_path) / "dataset.yaml"
+        if not yaml_path.exists():
+            raise FileNotFoundError(f"dataset.yaml not found in '{local_path}'")
+        y = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        print(f"  [{i}] loaded {yaml_path}")
+
+        # Validate classes incrementally against the first dataset
+        dataset_names = names_as_list(y["names"])
+        if classes is None:
+            classes = y["names"]
+        elif tuple(names_as_list(classes)) != tuple(dataset_names):
+            raise ValueError(
+                f"Class mismatch in dataset {i} ('{local_path}'):\n"
+                f"  expected : {names_as_list(classes)}\n"
+                f"  got      : {dataset_names}"
+            )
+
         prefix = f"d{i}"
-        print(f"  dataset {i}: {dataset_dir}")
-        if copy_split(dataset_dir, y, "train", output_path, prefix):
+        if copy_split(Path(local_path), y, "train", output_path, prefix):
             has_train = True
-        if copy_split(dataset_dir, y, "val", output_path, prefix):
+        if copy_split(Path(local_path), y, "val", output_path, prefix):
             has_val = True
 
-    # --- Cleanup temp download dirs (no longer needed after copy) ---
-    for d in tmp_download_dirs:
-        shutil.rmtree(d, ignore_errors=True)
-    tmp_download_dirs.clear()
+        if tmp_parent:
+            shutil.rmtree(tmp_parent, ignore_errors=True)
+            print(f"  [{i}] temp download dir removed")
 
     # --- Validate ---
     print("  validating combined dataset...")
