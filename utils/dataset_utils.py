@@ -42,15 +42,13 @@ def wandb_isolated_dirs():
     """
     prev_cache = os.environ.get("WANDB_CACHE_DIR")
     prev_data = os.environ.get("WANDB_DATA_DIR")
-    tmp_cache = tempfile.mkdtemp(prefix="wandb_cache_")
-    tmp_data = tempfile.mkdtemp(prefix="wandb_data_")
-    os.environ["WANDB_CACHE_DIR"] = tmp_cache
-    os.environ["WANDB_DATA_DIR"] = tmp_data
+    tmp_dir = tempfile.mkdtemp(prefix="wandb_tmp_")
+    os.environ["WANDB_CACHE_DIR"] = tmp_dir
+    os.environ["WANDB_DATA_DIR"] = tmp_dir
     try:
         yield
     finally:
-        shutil.rmtree(tmp_cache, ignore_errors=True)
-        shutil.rmtree(tmp_data, ignore_errors=True)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         if prev_cache is not None:
             os.environ["WANDB_CACHE_DIR"] = prev_cache
         else:
