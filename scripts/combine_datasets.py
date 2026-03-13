@@ -38,12 +38,11 @@ python combine_datasets.py \\
 """
 
 import argparse
-import os
 import shutil
 import tempfile
 from pathlib import Path
 
-from utils.dataset_utils import validate_split
+from utils.dataset_utils import validate_split, wandb_isolated_dirs
 
 import yaml
 
@@ -169,13 +168,7 @@ def register_in_wandb(
     """Upload combined dataset directory to W&B. W&B artifact entries are declared as lineage inputs."""
     import wandb
 
-    # Redirect W&B artifact cache to a temp dir so ~/.cache/wandb/artifacts
-    # does not accumulate large dataset files after each upload.
-    _prev_cache = os.environ.get("WANDB_CACHE_DIR")
-    _tmp_cache = tempfile.mkdtemp(prefix="wandb_cache_")
-    os.environ["WANDB_CACHE_DIR"] = _tmp_cache
-
-    try:
+    with wandb_isolated_dirs():
         _do_register_in_wandb(
             wandb=wandb,
             output_dir=output_dir,
@@ -187,12 +180,6 @@ def register_in_wandb(
             wandb_collection=wandb_collection,
             wandb_org=wandb_org,
         )
-    finally:
-        shutil.rmtree(_tmp_cache, ignore_errors=True)
-        if _prev_cache is not None:
-            os.environ["WANDB_CACHE_DIR"] = _prev_cache
-        else:
-            os.environ.pop("WANDB_CACHE_DIR", None)
 
 
 def _do_register_in_wandb(

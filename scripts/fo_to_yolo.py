@@ -48,7 +48,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 from fiftyone import ViewField as F
-from utils.dataset_utils import validate_split
+from utils.dataset_utils import validate_split, wandb_isolated_dirs
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +225,19 @@ def register_in_wandb(
     """Upload dataset artifact to W&B. If wandb_org is provided, also link to the Dataset Registry."""
     import wandb
 
+    with wandb_isolated_dirs():
+        _do_register_in_wandb(wandb, export_dir, dataset_name, params, wandb_entity, wandb_collection, wandb_org)
+
+
+def _do_register_in_wandb(
+    wandb,
+    export_dir: str,
+    dataset_name: str,
+    params: dict,
+    wandb_entity: str,
+    wandb_collection: str,
+    wandb_org: str | None,
+) -> None:
     # A run is required by W&B to upload artifacts. We use a fixed internal
     # project so it never appears alongside training experiments.
     with wandb.init(
