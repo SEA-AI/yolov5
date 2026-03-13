@@ -386,6 +386,8 @@ def export_dataset(cfg: ExportConfig) -> None:
     tmp_name = f"tmp_{cfg.dataset_name}"
     if cfg.use_16bit:
         LOGGER.info("  switching filepaths to 16-bit PNG...")
+        if fo.dataset_exists(tmp_name):
+            fo.delete_dataset(tmp_name)
         export = export.clone(tmp_name)
         filepaths = [
             fp.replace("8Bit", "16Bit").replace("jpg", "png")
