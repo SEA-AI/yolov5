@@ -23,7 +23,7 @@ Usage (W&B artifacts — no local setup needed):
 python combine_datasets.py \\
   --datasets "sea-ai/dataset-registry/DATASET_A:v0" "sea-ai/dataset-registry/DATASET_B:v1" \\
   --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
-  # artifacts are downloaded to a temp dir automatically
+  # artifacts are downloaded to a /tmp temp dir, W&B cache skipped
 
 Usage (mixed):
 python combine_datasets.py \\
@@ -31,7 +31,7 @@ python combine_datasets.py \\
   --wandb --wandb-entity sea-ai --wandb-collection "my-combined-dataset"
 
   # --output-dir "/mnt/datasets/COMBINED"  → where the combined dataset is written (default: temp dir)
-  # --download-dir "/mnt/datasets"  → where W&B artifacts are downloaded (default: temp dir)
+  # --download-dir "/mnt/datasets"  → where W&B artifacts are downloaded (default: /tmp, cache skipped)
   # --wandb-org sea-ai-org  → also links to the Dataset Registry
   # W&B versions artifacts by content hash: a new version is only created when the combined files differ from the previous upload
   # A description will be prompted interactively and is required to proceed.
@@ -42,7 +42,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from utils.dataset_utils import validate_split
+from utils.dataset_utils import validate_split, wandb_isolated_dirs
 
 import yaml
 
@@ -74,16 +74,29 @@ def validate_classes(yamls: list[tuple[Path, dict]]) -> list[str]:
     return yamls[0][1]["names"]  # return as-is from the source yaml
 
 
-def download_artifact(ref: str, download_dir: str) -> str:
-    """Download a W&B artifact and return its local path."""
+def download_artifact(ref: str, download_dir: str | None) -> tuple[str, str | None]:
+    """Download a W&B artifact and return (local_path, tmp_dir_to_cleanup).
+
+    The W&B cache is always skipped (skip_cache=True). If *download_dir* is
+    None the artifact is placed under a fresh temp directory in /tmp and the
+    temp parent is returned as the second element for the caller to clean up.
+    If *download_dir* is given the second element is None.
+    """
     import wandb
 
+    artifact_name = ref.split("/")[-1].split(":")[0]
     api = wandb.Api()
     artifact = api.artifact(ref)
-    artifact_name = ref.split("/")[-1].split(":")[0]
+
+    if download_dir is None:
+        tmp_parent = tempfile.mkdtemp(dir="/tmp", prefix="wandb_")
+        dest = str(Path(tmp_parent) / artifact_name)
+        artifact.download(root=dest, skip_cache=True)
+        return dest, tmp_parent
+
     dest = str(Path(download_dir) / artifact_name)
-    artifact.download(root=dest)
-    return dest
+    artifact.download(root=dest, skip_cache=True)
+    return dest, None
 
 
 
@@ -155,6 +168,31 @@ def register_in_wandb(
     """Upload combined dataset directory to W&B. W&B artifact entries are declared as lineage inputs."""
     import wandb
 
+    with wandb_isolated_dirs():
+        _do_register_in_wandb(
+            wandb=wandb,
+            output_dir=output_dir,
+            description=description,
+            dataset_dirs=dataset_dirs,
+            classes=classes,
+            wandb_refs=wandb_refs,
+            wandb_entity=wandb_entity,
+            wandb_collection=wandb_collection,
+            wandb_org=wandb_org,
+        )
+
+
+def _do_register_in_wandb(
+    wandb,
+    output_dir: Path,
+    description: str,
+    dataset_dirs: list[str],
+    classes: list[str],
+    wandb_refs: list[str],
+    wandb_entity: str,
+    wandb_collection: str,
+    wandb_org: str | None,
+) -> None:
     with wandb.init(
         entity=wandb_entity,
         project="dataset-registry",
@@ -219,56 +257,61 @@ def combine_datasets(
     if register_wandb and not wandb_entity:
         raise ValueError("--wandb-entity is required when --wandb is set.")
 
-    # --- Resolve entries: download W&B refs, keep local paths as-is ---
-    local_dirs: list[str] = []
-    wandb_refs: list[str] = []
-
-    for entry in datasets:
-        if is_wandb_ref(entry):
-            if not download_dir:
-                download_dir = tempfile.mkdtemp()
-                print(f"No --download-dir set, using temp dir: {download_dir}")
-            print(f"Downloading artifact '{entry}'...")
-            local_path = download_artifact(entry, download_dir)
-            print(f"  → {local_path}")
-            local_dirs.append(local_path)
-            wandb_refs.append(entry)
-        else:
-            local_dirs.append(entry)
-
     # Resolve output directory
     if not output_dir:
         output_dir = tempfile.mkdtemp()
         print(f"No --output-dir set, using temp dir: {output_dir}")
 
     wandb_collection = wandb_collection or Path(output_dir).name
-
-    # --- Read and validate ---
-    print(f"\nReading {len(local_dirs)} dataset(s)...")
-    yamls: list[tuple[Path, dict]] = []
-    for d in local_dirs:
-        yaml_path = Path(d) / "dataset.yaml"
-        if not yaml_path.exists():
-            raise FileNotFoundError(f"dataset.yaml not found in '{d}'")
-        yamls.append((Path(d), yaml.safe_load(yaml_path.read_text(encoding="utf-8"))))
-        print(f"  loaded {yaml_path}")
-
-    classes = validate_classes(yamls)
-    print(f"  classes consistent across all datasets: {classes}")
-
-    # --- Copy images and labels ---
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
+    # --- Download, copy, and immediately cleanup each dataset in turn ---
+    local_dirs: list[str] = []
+    wandb_refs: list[str] = []
+    classes = None
     has_train, has_val = False, False
-    print(f"\nCopying dataset files to {output_dir}...")
-    for i, (dataset_dir, y) in enumerate(yamls):
+
+    print(f"\nProcessing {len(datasets)} dataset(s)...")
+    for i, entry in enumerate(datasets):
+        if is_wandb_ref(entry):
+            if not download_dir:
+                print(f"  No --download-dir set, downloading to /tmp.")
+            print(f"  [{i}] Downloading artifact '{entry}'...")
+            local_path, tmp_parent = download_artifact(entry, download_dir)
+            print(f"      → {local_path}")
+            wandb_refs.append(entry)
+        else:
+            local_path, tmp_parent = entry, None
+
+        local_dirs.append(local_path)
+
+        yaml_path = Path(local_path) / "dataset.yaml"
+        if not yaml_path.exists():
+            raise FileNotFoundError(f"dataset.yaml not found in '{local_path}'")
+        y = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        print(f"  [{i}] loaded {yaml_path}")
+
+        # Validate classes incrementally against the first dataset
+        dataset_names = names_as_list(y["names"])
+        if classes is None:
+            classes = y["names"]
+        elif tuple(names_as_list(classes)) != tuple(dataset_names):
+            raise ValueError(
+                f"Class mismatch in dataset {i} ('{local_path}'):\n"
+                f"  expected : {names_as_list(classes)}\n"
+                f"  got      : {dataset_names}"
+            )
+
         prefix = f"d{i}"
-        print(f"  dataset {i}: {dataset_dir}")
-        if copy_split(dataset_dir, y, "train", output_path, prefix):
+        if copy_split(Path(local_path), y, "train", output_path, prefix):
             has_train = True
-        if copy_split(dataset_dir, y, "val", output_path, prefix):
+        if copy_split(Path(local_path), y, "val", output_path, prefix):
             has_val = True
+
+        if tmp_parent:
+            shutil.rmtree(tmp_parent, ignore_errors=True)
+            print(f"  [{i}] temp download dir removed")
 
     # --- Validate ---
     print("  validating combined dataset...")
@@ -348,7 +391,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--download-dir",
         default=None,
-        help="Directory to download W&B artifacts into. Defaults to a temp directory if any entry in --datasets is a W&B artifact ref.",
+        help="Directory to download W&B artifacts into. Defaults to a /tmp temp directory (W&B cache skipped).",
     )
 
     # Weights & Biases
