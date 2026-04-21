@@ -373,9 +373,9 @@ class YOLO(nn.Module):
         weights_list = [weights] if isinstance(weights, str) else list(weights)
         if not weights_list:
             raise ValueError("weights must be at least one path")
-        self._det_models = [
-            ObjectsModel(get_weights_path(w), device=device, fp16=fp16, fuse=fuse) for w in weights_list
-        ]
+        self._det_models = nn.ModuleList(
+            [ObjectsModel(get_weights_path(w), device=device, fp16=fp16, fuse=fuse) for w in weights_list]
+        )
         # First model drives device, stride, and preprocessing
         self.obj_det = self._det_models[0]
         self.device = self.obj_det.device
@@ -747,6 +747,8 @@ def get_weights_path(weights_path: str) -> str:
         LOGGER.info(f"Attempting to download from {kind}: {artifact_name}")
         artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
         return str(next(Path(artifact_path).glob("*.pt")))
+
+    raise ValueError(f"Could not find weights for {weights_path}")
 
 
 def transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
