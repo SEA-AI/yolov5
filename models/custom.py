@@ -743,10 +743,16 @@ def get_weights_path(weights_path: str) -> str:
         candidates.append((f"wandb-registry-model/{weights_path}", "registry"))
     candidates.append((weights_path, "run"))
 
+    root = Path("artifacts", weights_path)
     for artifact_name, kind in candidates:
         LOGGER.info(f"Attempting to download from {kind}: {artifact_name}")
-        artifact_path = api.artifact(name=artifact_name).download(root=Path("artifacts", weights_path))
-        return str(next(Path(artifact_path).glob("*.pt")))
+        try:
+            p = api.artifact(name=artifact_name).download(root=root)
+            if w := next(Path(p).glob("*.pt"), None):
+                return str(w)
+            raise FileNotFoundError(f"no .pt in {p}")
+        except Exception as e:
+            LOGGER.warning(f"{kind}:{artifact_name}: {e}")
 
     raise ValueError(f"Could not find weights for {weights_path}")
 
