@@ -826,8 +826,10 @@ def get_weights_path(weights_path: str) -> str:
     try:
         import wandb
     except ImportError:
-        LOGGER.error("Please install wandb to download models from W&B registry")
-        return weights_path
+        raise ImportError(
+            f"Could not resolve W&B artifact '{weights_path}' because wandb is not installed. "
+            "Install wandb to download W&B model artifacts."
+        ) from None
 
     api = wandb.Api()
 
