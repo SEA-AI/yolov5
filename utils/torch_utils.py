@@ -503,7 +503,7 @@ def is_obb_weights(path: str) -> bool:
     """
     Checks if the model is an OBBModel by loading the checkpoint and checking the type of the model.
     """
-    checkpoint = torch.load(path, map_location='cpu')
+    checkpoint = torch.load(path, map_location='cpu', weights_only=False)
     model = checkpoint.get('model', checkpoint)
 
     return isinstance(model, OBBModel)
