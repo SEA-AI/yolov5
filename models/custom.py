@@ -351,7 +351,7 @@ class ObjectsModel(BaseModel):
 class YOLO(nn.Module):
     """YOLO model: one or more detection weights, same input, single output.
 
-    - One weight: single detection model.
+    - One weight: single detection model with preprocessing/postprocessing hooks.
     - Two or more weights: ensemble (same input to all, merged output with shared class space).
     """
 
@@ -383,6 +383,7 @@ class YOLO(nn.Module):
         self.stride = self.obj_det.stride
         self.imgsz = transform_sz(imgsz)
         self.infsz = transform_sz(imgsz) if infsz is None else transform_sz(infsz)
+        self.hooks = {}
         self.transform, self.ratio_pad = self.get_transform(imgsz, infsz)
 
         models_id2name: List[Dict[int, str]] = [m.names for m in self._det_models]
@@ -398,29 +399,11 @@ class YOLO(nn.Module):
         if len(self._det_models) > 1:
             LOGGER.info(f"YOLO ensemble: {len(self._det_models)} models, merged classes={self.names}")
 
-    def _preprocess(self, x: torch.Tensor) -> torch.Tensor:
-        """uint8 input -> optional resize/pad -> fp16/fp32 -> scale to [0, 1]."""
-        if self.transform is not None:
-            x = x.float()
-            x = self.transform(x)
-        x = x.half() if self.fp16 else x.float()
-        return x / 255
-
-    def _postprocess_det(self, x: torch.Tensor, *, xywh: bool = False, clip: bool = True) -> torch.Tensor:
-        """Scale boxes back to original image size and cast to float. For OBB/horizons use xywh=True, clip=False."""
-        if self.ratio_pad is not None:
-            x = scale_boxes(self.infsz, x, self.imgsz, ratio_pad=self.ratio_pad, xywh=xywh, clip=clip)
-        if self.fp16:
-            x = x.float()
-        return x
-
     def forward(self, x, profile=False, visualize=False):
-        """Preprocess -> run detection model(s) -> merge if ensemble -> postprocess."""
-        x = self._preprocess(x)
+        """Run all models on input and merge their detections into one tensor."""
         preds = [m(x, profile, visualize) for m in self._det_models]
         det_tensors = [p[0] if isinstance(p, tuple) else p for p in preds]
-        det = det_tensors[0] if len(det_tensors) == 1 else self._merge_detections(det_tensors)
-        return (self._postprocess_det(det),)
+        return (det_tensors[0],) if len(det_tensors) == 1 else (self._merge_detections(det_tensors),)
 
     def _merge_detections(self, det_tensors: List[torch.Tensor]) -> torch.Tensor:
         """Merge per-model detection tensors into one with class columns remapped to shared space.
@@ -452,6 +435,29 @@ class YOLO(nn.Module):
         )
         out = torch.gather(stacked, dim=3, index=gather_index)
         return out.reshape(batch, n_models * max_dets, n_shared_cols)
+
+    def register_preprocessing_hook(self):
+        """Register hooks to convert uint8 to fp16/fp32 and scale by 1/255 before forward pass."""
+        if "preprocessing" in self.hooks:
+            return
+        self.hooks["preprocessing"] = self.register_forward_pre_hook(self._preprocessing_hook)
+
+    def register_postprocessing_hook(self):
+        """Register hooks to convert half to float precision after forward pass."""
+        if "postprocessing" in self.hooks:
+            return
+        self.hooks["postprocessing"] = self.register_forward_hook(self._postprocessing_hook)
+
+    def register_io_hooks(self):
+        """Register hooks for input and output processing."""
+        self.register_preprocessing_hook()
+        self.register_postprocessing_hook()
+
+    def remove_hooks(self):
+        """Remove hooks."""
+        for _, hook in self.hooks.items():
+            hook.remove()
+        self.hooks.clear()
 
     @staticmethod
     def get_transform(imgsz: Tuple[int, int], infsz: Optional[Tuple[int, int]] = None):
@@ -511,6 +517,38 @@ class YOLO(nn.Module):
 
         return pad_left, pad_right, pad_top, pad_bottom
 
+    @staticmethod
+    def _preprocessing_hook(module, inputs):
+        """Add preprocessing operations to be part of the model."""
+
+        def _preprocess(x: torch.Tensor):
+            if len(x.shape) < 1:
+                return x
+            if module.transform is not None:
+                x = x.float()
+                x = module.transform(x)
+            x = x.half() if module.fp16 else x.float()
+            x = x / 255  # 0-255 to 0.0-1.0
+            return x
+
+        return tuple(_preprocess(inp) for inp in inputs)
+
+    @staticmethod
+    def _postprocessing_hook(module, _inputs, outputs):
+        """Convert outputs to float (if needed) and scale back boxes if transform was applied."""
+
+        def _to_float(x):
+            return x.float() if module.fp16 else x
+
+        # Scale back boxes if transform was applied
+        if module.ratio_pad is not None:
+            outputs = (scale_boxes(module.infsz, outputs[0], module.imgsz, ratio_pad=module.ratio_pad),) + outputs[1:]
+
+        # Convert first item (detection outputs) to float if needed
+        outputs = (_to_float(outputs[0]),) + outputs[1:]
+
+        return outputs
+
     def prepare_for_export(self, dynamic: bool = False):
         """Prepare model(s) for export."""
         LOGGER.info(f"✨ Preparing {self.__class__.__name__} for export...")
@@ -522,7 +560,7 @@ class AHOY(YOLO):
     """Base class for AHOY models that extends YOLO with horizon detection.
 
     AHOY: **A** **H**orizon and **O**bject detection **Y**OLO-based model.
-    Inherits preprocessing, transform logic, and detection postprocessing from YOLO.
+    Inherits preprocessing, hook management, and transform logic from YOLO.
     """
 
     def __new__(cls, hor_det_weights: str, **kwargs):
@@ -599,15 +637,21 @@ class AHOY(YOLO):
         """Forward pass through models."""
         raise NotImplementedError("Subclasses should implement this method")
 
+    @staticmethod
+    def _postprocessing_hook(module, inputs, outputs):
+        """Convert outputs to float (if needed) and apply softmax to logits."""
+        raise NotImplementedError("Subclasses should implement this method")
+
     def prepare_for_export(self, dynamic: bool = False):
-        """Prepare all detection models and horizon model for export."""
-        super().prepare_for_export(dynamic)
+        """Prepare both object detection and horizon detection models for export."""
+        LOGGER.info(f"✨ Preparing {self.obj_det.__class__.__name__} for export...")
+        self.obj_det.prepare_for_export(dynamic)
         LOGGER.info(f"✨ Preparing {self.hor_det.__class__.__name__} for export...")
         self.hor_det.prepare_for_export(dynamic)
 
 
 class AHOYv1(AHOY):
-    """AHOYv1: object detection + horizon classification (pitch & theta logits)."""
+    """A H-orizon O-bject detection Y-OLOv5 (object detection with yolov5)."""
 
     def load_hor_det(
         self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
@@ -616,21 +660,40 @@ class AHOYv1(AHOY):
         return HorizonModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
 
     def forward(self, x, profile=False, visualize=False):
-        x = self._preprocess(x)
+        """Forward pass through models."""
         objects = self.obj_det(x, profile, visualize)
         pitch, theta = self.hor_det(x, profile, visualize)
+        return objects, pitch, theta
 
-        det = self._postprocess_det(objects[0])
-        pitch = pitch.softmax(-1)
-        theta = theta.softmax(-1)
-        if self.fp16:
-            pitch = pitch.float()
-            theta = theta.float()
-        return (det,) + objects[1:], pitch, theta
+    @staticmethod
+    def _postprocessing_hook(module, inputs, outputs):
+        """Convert outputs to float (if needed) and apply softmax to logits."""
+
+        def _to_float(x):
+            return x.float() if module.fp16 else x
+
+        # ahoy outputs: (tuple(Tensor, ...), Tensor, Tensor)
+        first_tuple, second_item, third_item = outputs
+
+        # Scale back boxes if transform was applied
+        if module.ratio_pad is not None:
+            first_tuple = (
+                scale_boxes(module.infsz, first_tuple[0], module.imgsz, ratio_pad=module.ratio_pad),
+            ) + first_tuple[1:]
+
+        # Only convert the first item of the first tuple (the detection outputs)
+        first_tuple = (_to_float(first_tuple[0]),) + first_tuple[1:]
+
+        # second and third items are classification logits
+        second_item = second_item.softmax(-1)  # batch dim
+        third_item = third_item.softmax(-1)  # batch dim
+
+        # Reconstruct the overall output
+        return (first_tuple, _to_float(second_item), _to_float(third_item))
 
 
 class AHOYv2(AHOY):
-    """AHOYv2: object detection + OBB-based horizon detection."""
+    """A H-orizon O-bject detection Y-OLOv5 (object detection with yolov5)."""
 
     def load_hor_det(
         self, hor_det_weights: str, device: Union[str, torch.device] = None, fp16: bool = False, fuse: bool = True
@@ -639,13 +702,39 @@ class AHOYv2(AHOY):
         return OBBModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
 
     def forward(self, x, profile=False, visualize=False):
-        x = self._preprocess(x)
+        """Forward pass through models."""
         objects = self.obj_det(x, profile, visualize)
         horizons = self.hor_det(x)
+        return objects, horizons
 
-        det = self._postprocess_det(objects[0])
-        horizons = self._postprocess_det(horizons.transpose(1, 2), xywh=True, clip=False)
-        return (det,) + objects[1:], horizons
+    @staticmethod
+    def _postprocessing_hook(module, inputs, outputs):
+        """Convert outputs to float (if needed) and apply softmax to logits."""
+
+        def _to_float(x):
+            return x.float() if module.fp16 else x
+
+        # first_tuple: (tuple(Tensor, ...), Tensor)
+        # second_tuple: Tensor
+        first_tuple, second_item = outputs
+
+        # transpose to (batch_size, num_boxes, num_classes)
+        second_item = second_item.transpose(1, 2)
+
+        # Scale back boxes if transform was applied
+        if module.ratio_pad is not None:
+            first_tuple = (
+                scale_boxes(module.infsz, first_tuple[0], module.imgsz, ratio_pad=module.ratio_pad),
+            ) + first_tuple[1:]
+            second_item = scale_boxes(
+                module.infsz, second_item, module.imgsz, ratio_pad=module.ratio_pad, xywh=True, clip=False
+            )
+
+        # Only convert the first item of the first tuple (the detection outputs)
+        first_tuple = (_to_float(first_tuple[0]),) + first_tuple[1:]
+        second_item = _to_float(second_item)
+
+        return (first_tuple, second_item)
 
 
 class DAN(nn.Module):
@@ -682,6 +771,11 @@ class DAN(nn.Module):
         out_a = self.model_a(x_1, profile, visualize)
         out_b = self.model_b(x_2, profile, visualize)
         return out_a, out_b
+
+    def register_io_hooks(self):
+        """Register hooks for input and output processing."""
+        self.model_a.register_io_hooks()
+        self.model_b.register_io_hooks()
 
 
 def _find_cutoff(model):

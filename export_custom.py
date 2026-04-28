@@ -43,7 +43,7 @@ def export_model_to_onnx(
     Generic export logic for both YOLO and AHOY models.
 
     Args:
-        model: The model to export (must have prepare_for_export method and pre/post in forward)
+        model: The model to export (must have prepare_for_export and register_io_hooks methods)
         imgsz: Image size as (height, width) tuple
         batch_size: Batch size for the model
         fname: Output filename for the ONNX model
@@ -63,6 +63,7 @@ def export_model_to_onnx(
     LOGGER.info(f"🚀 Exporting model {type(model).__name__} to {fname}...")
 
     model.prepare_for_export(dynamic=dynamic)
+    model.register_io_hooks()  # inp: uint8 -> fp32/fp16 / 255.0, out: fp16 -> fp32
 
     image = torch.zeros((batch_size, 3, imgsz[0], imgsz[1]), device=model.device).byte()  # B, C, H, W
     image = image.float() if trt7_compatible else image
