@@ -92,6 +92,7 @@ def main(
     half: bool,
     fuse: bool,
     hor_weights: str | None = None,
+    device: str = "cpu",
     dynamic: bool = False,
     simplify: bool = False,
     trt7_compatible: bool = False,
@@ -106,6 +107,7 @@ def main(
             fuse=fuse,
             imgsz=imgsz,
             infsz=infsz,
+            device=device,
         )
     else:
         model = YOLO(
@@ -114,6 +116,7 @@ def main(
             fuse=fuse,
             imgsz=imgsz,
             infsz=infsz,
+            device=device,
         )
 
     export_model_to_onnx(
@@ -171,6 +174,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("-si", "--simplify", action="store_true", help="Run ONNX simplifier.")
     parser.add_argument("-dy", "--dynamic", action="store_true", help="Dynamic batch axis.")
     parser.add_argument("-trt7", "--trt7-compatible", action="store_true", help="TensorRT 7 compatible ONNX.")
+    parser.add_argument("-dv", "--device", type=str, default="cpu", help="cuda device, i.e. 0 or 0,1,2,3 or cpu.")
     parser.add_argument("-f", "--fname", type=str, default="", help="Output ONNX filename (default: auto).")
     return parser.parse_args()
 
