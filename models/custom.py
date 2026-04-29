@@ -429,7 +429,8 @@ class YOLO(nn.Module):
         stacked = torch.stack(padded, dim=1)  # (B, n_models, max_dets, max_local_cols)
 
         gather_index = (
-            self._gather_col_index.unsqueeze(0)  # (1, n_models, n_shared_cols)
+            self._gather_col_index.to(stacked.device)
+            .unsqueeze(0)  # (1, n_models, n_shared_cols)
             .unsqueeze(2)  # (1, n_models, 1, n_shared_cols)
             .expand(batch, n_models, max_dets, n_shared_cols)  # (B, n_models, max_dets, n_shared_cols)
         )
