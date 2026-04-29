@@ -820,7 +820,7 @@ def get_weights_path(weights_path: str) -> str:
     """
 
     # Check if it's a local file first
-    if Path(weights_path).exists():
+    if Path(weights_path).is_file():
         return weights_path
 
     try:
@@ -873,6 +873,9 @@ def transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
         return imgsz, imgsz
     if not isinstance(imgsz, (list, tuple)) or len(imgsz) not in (1, 2):
         raise ValueError(f"imgsz must be int or a list/tuple of 1 or 2 elements, got {imgsz}")
+    for elem in imgsz:
+        if not isinstance(elem, int) or elem <= 0:
+            raise ValueError(f"imgsz elements must be positive integers, got {imgsz!r}")
     return imgsz[0], imgsz[-1]
 
 
