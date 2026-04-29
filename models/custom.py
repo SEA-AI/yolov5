@@ -12,10 +12,11 @@ from ultralytics.nn.tasks import BaseModel as UBaseModel
 from models.common import Classify, DetectMultiBackend
 from models.experimental import attempt_load
 from models.yolo import BaseModel, Detect, DetectionModel
-from utils.export import get_weights_path, transform_sz
 from utils.general import LOGGER, scale_boxes
 from utils.plots import feature_visualization
 from utils.torch_utils import is_obb_weights, select_device
+
+ERR_MODEL_PT_PATH = "model must be a path to a .pt file"
 
 
 class OBBModel(UBaseModel):
@@ -36,7 +37,7 @@ class OBBModel(UBaseModel):
             model = UltralyticsYOLO(model=weights)
             LOGGER.info(f"Loaded weights from {weights}")
         else:
-            raise ValueError("model must be a path to a .pt file")
+            raise ValueError(ERR_MODEL_PT_PATH)
 
         model.to(self.device)
         if fuse:
@@ -119,7 +120,7 @@ class HorizonModel(BaseModel):
             stride = model.stride
             LOGGER.info(f"Loaded weights from {weights}")
         else:
-            raise ValueError("model must be a path to a .pt file")
+            raise ValueError(ERR_MODEL_PT_PATH)
 
         if isinstance(model, DetectionModel):
             LOGGER.warning("WARNING ⚠️ converting YOLOv5 DetectionModel to HorizonModel")
@@ -323,7 +324,7 @@ class ObjectsModel(BaseModel):
             names = model.module.names if hasattr(model, "module") else model.names  # get class names
             LOGGER.info(f"Loaded weights from {weights}")
         else:
-            raise ValueError("model must be a path to a .pt file")
+            raise ValueError(ERR_MODEL_PT_PATH)
 
         self.model = model.model
         self.model.to(self.device)
@@ -354,7 +355,7 @@ class YOLO(nn.Module):
     - Two or more weights: ensemble (same input to all, merged output with shared class space).
     """
 
-    N_FIXED_COLS = 5  # x1, y1, x2, y2, confidence
+    N_FIXED_COLS = 5  # x1, y1, x2, y2, confidence (fixed columns before class scores)
 
     def __init__(
         self,
@@ -367,17 +368,14 @@ class YOLO(nn.Module):
     ):
         """Initialize YOLO. Pass one path for single model, N paths for ensemble (merged output)."""
         super().__init__()
+        self.obj_det_weights = weights[0] if len(weights) == 1 else weights  # saved in onnx model metadata
 
         weights_list = [weights] if isinstance(weights, str) else list(weights)
         if not weights_list:
             raise ValueError("weights must be at least one path")
-        self.obj_det_weights = (
-            weights_list[0] if len(weights_list) == 1 else weights_list
-        )  # saved in onnx model metadata
         self._det_models = nn.ModuleList(
             [ObjectsModel(get_weights_path(w), device=device, fp16=fp16, fuse=fuse) for w in weights_list]
         )
-
         # First model drives device, stride, and preprocessing
         self.obj_det = self._det_models[0]
         self.device = self.obj_det.device
@@ -431,7 +429,8 @@ class YOLO(nn.Module):
         stacked = torch.stack(padded, dim=1)  # (B, n_models, max_dets, max_local_cols)
 
         gather_index = (
-            self._gather_col_index.unsqueeze(0)  # (1, n_models, n_shared_cols)
+            self._gather_col_index.to(stacked.device)
+            .unsqueeze(0)  # (1, n_models, n_shared_cols)
             .unsqueeze(2)  # (1, n_models, 1, n_shared_cols)
             .expand(batch, n_models, max_dets, n_shared_cols)  # (B, n_models, max_dets, n_shared_cols)
         )
@@ -536,7 +535,7 @@ class YOLO(nn.Module):
         return tuple(_preprocess(inp) for inp in inputs)
 
     @staticmethod
-    def _postprocessing_hook(module, _inputs, detections):
+    def _postprocessing_hook(module, _inputs, outputs):
         """Convert outputs to float (if needed) and scale back boxes if transform was applied."""
 
         def _to_float(x):
@@ -544,14 +543,12 @@ class YOLO(nn.Module):
 
         # Scale back boxes if transform was applied
         if module.ratio_pad is not None:
-            detections = (
-                scale_boxes(module.infsz, detections[0], module.imgsz, ratio_pad=module.ratio_pad),
-            ) + detections[1:]
+            outputs = (scale_boxes(module.infsz, outputs[0], module.imgsz, ratio_pad=module.ratio_pad),) + outputs[1:]
 
         # Convert first item (detection outputs) to float if needed
-        detections = (_to_float(detections[0]),) + detections[1:]
+        outputs = (_to_float(outputs[0]),) + outputs[1:]
 
-        return detections
+        return outputs
 
     def prepare_for_export(self, dynamic: bool = False):
         """Prepare model(s) for export."""
@@ -584,7 +581,7 @@ class AHOY(YOLO):
 
     def __init__(
         self,
-        obj_det_weights: str,
+        obj_det_weights: str | Sequence[str],
         hor_det_weights: str,
         device: Union[str, torch.device] = "",  # automatically select device
         fp16: bool = False,
@@ -809,6 +806,78 @@ def _get_classification_heads(model, cutoff, nc_pitch, nc_theta):
     c_theta.i, c_theta.f, c_theta.type = "c_theta", cutoff, "models.common.Classify"
 
     return c_pitch, c_theta
+
+
+def get_weights_path(weights_path: str) -> str:
+    """Get model weights from local path or W&B registry/run.
+
+    Args:
+        weights_path: Local path or W&B artifact in format:
+                     - <collection_name>:<version> (for registry)
+                     - <entity>/<project>/<artifact_name>:<version> (for run)
+
+    Returns:
+        Path to model weights file
+    """
+
+    # Check if it's a local file first
+    if Path(weights_path).is_file():
+        return weights_path
+
+    try:
+        import wandb
+    except ImportError:
+        raise ImportError(
+            f"Could not resolve W&B artifact '{weights_path}' because wandb is not installed. "
+            "Install wandb to download W&B model artifacts."
+        ) from None
+
+    api = wandb.Api()
+
+    # Build candidates: registry (collection:version) first, then run artifact path
+    candidates = []
+    if ":" in weights_path and "/" not in weights_path.split(":")[0]:
+        candidates.append((f"wandb-registry-model/{weights_path}", "registry"))
+    candidates.append((weights_path, "run"))
+
+    root = Path("artifacts", weights_path)
+    for artifact_name, kind in candidates:
+        LOGGER.info(f"Attempting to download from {kind}: {artifact_name}")
+        try:
+            p = api.artifact(name=artifact_name).download(root=root)
+            if w := next(Path(p).glob("*.pt"), None):
+                return str(w)
+            raise FileNotFoundError(f"no .pt in {p}")
+        except Exception as e:
+            LOGGER.warning(f"{kind}:{artifact_name}: {e}")
+
+    raise ValueError(f"Could not find weights for {weights_path}")
+
+
+def transform_sz(imgsz: int | List[int] | Tuple[int, int]) -> Tuple[int, int]:
+    """
+    Convert size specifications to (height, width) tuple format.
+
+    Args:
+        imgsz: Int, list, or tuple representing dimensions.
+            - If int: converted to (imgsz, imgsz)
+            - If list/tuple with 1 or 2 elements: converted to (imgsz[0], imgsz[-1])
+
+    Returns:
+        Tuple in (height, width) format.
+
+    Raises:
+        ValueError: If imgsz is not int, list, or tuple, or if list/tuple has more than 2 elements.
+    """
+    # Handle scalar case (single integer)
+    if isinstance(imgsz, int):
+        return imgsz, imgsz
+    if not isinstance(imgsz, (list, tuple)) or len(imgsz) not in (1, 2):
+        raise ValueError(f"imgsz must be int or a list/tuple of 1 or 2 elements, got {imgsz}")
+    for elem in imgsz:
+        if not isinstance(elem, int) or elem <= 0:
+            raise ValueError(f"imgsz elements must be positive integers, got {imgsz!r}")
+    return imgsz[0], imgsz[-1]
 
 
 def _merge_class_names(
