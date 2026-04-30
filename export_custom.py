@@ -78,7 +78,7 @@ def export_model_to_onnx(
         file=Path(fname),
         dynamic=dynamic,
         simplify=simplify,
-        opset=18,
+        opset=12,
     )
 
     return result
