@@ -94,12 +94,13 @@ MACOS = platform.system() == "Darwin"  # macOS environment
 class iOSModel(torch.nn.Module):
     """An iOS-compatible wrapper for YOLOv5 models that normalizes input images based on their dimensions."""
 
-    def __init__(self, model, im):
+    def __init__(self, model, im, mlprogram=False):
         """Initializes an iOS compatible model with normalization based on image dimensions.
 
         Args:
             model (torch.nn.Module): The PyTorch model to be adapted for iOS compatibility.
             im (torch.Tensor): An input tensor representing a batch of images with shape (B, C, H, W).
+            mlprogram (bool): Whether exporting as mlprogram (.mlpackage). Enables class-count padding workaround.
 
         Returns:
             None: This method does not return any value.
@@ -113,6 +114,7 @@ class iOSModel(torch.nn.Module):
         _b, _c, h, w = im.shape  # batch, channel, height, width
         self.model = model
         self.nc = model.nc  # number of classes
+        self.mlprogram = mlprogram
         if w == h:
             self.normalize = 1.0 / w
         else:
@@ -138,6 +140,11 @@ class iOSModel(torch.nn.Module):
             ```
         """
         xywh, conf, cls = self.model(x)[0].squeeze().split((4, 1, self.nc), 1)
+        if self.mlprogram and self.nc % 80 != 0:
+            # mlprogram NMS requires class count to be a multiple of 80
+            # https://github.com/ultralytics/ultralytics/issues/22309
+            pad = int(((self.nc + 79) // 80) * 80) - self.nc
+            cls = torch.nn.functional.pad(cls, (0, pad, 0, 0), "constant", 0)
         return cls * conf, xywh * self.normalize  # confidence (3780, 80), coordinates (3780, 4)
 
 
@@ -583,7 +590,8 @@ def export_coreml(model, im, file, int8, half, nms, mlmodel, prefix=colorstr("Co
         ```
 
     Notes:
-        The exported CoreML model will be saved with a .mlmodel extension.
+        The exported CoreML model is saved as .mlpackage by default (mlprogram backend, recommended).
+        Pass mlmodel=True to export the legacy .mlmodel format (neuralnetwork backend).
         Quantization is supported only on macOS.
     """
     check_requirements("coremltools")
@@ -599,7 +607,7 @@ def export_coreml(model, im, file, int8, half, nms, mlmodel, prefix=colorstr("Co
         convert_to = "mlprogram"
         precision = ct.precision.FLOAT16 if half else ct.precision.FLOAT32
     if nms:
-        model = iOSModel(model, im)
+        model = iOSModel(model, im, mlprogram=not mlmodel)
     ts = torch.jit.trace(model, im, strict=False)  # TorchScript model
     ct_model = ct.convert(
         ts,
@@ -616,9 +624,12 @@ def export_coreml(model, im, file, int8, half, nms, mlmodel, prefix=colorstr("Co
                 )  # suppress numpy==1.20 float warning, fixed in coremltools==7.0
                 ct_model = ct.models.neural_network.quantization_utils.quantize_weights(ct_model, bits, mode)
         elif bits == 8:
-            op_config = ct.optimize.coreml.OpPalettizerConfig(mode=mode, nbits=bits, weight_threshold=512)
-            config = ct.optimize.coreml.OptimizationConfig(global_config=op_config)
-            ct_model = ct.optimize.coreml.palettize_weights(ct_model, config)
+            # linear quantization (INT8) — better ANE/GPU utilization than palettization for mlpackage
+            import coremltools.optimize.coreml as cto
+
+            op_config = cto.OpLinearQuantizerConfig(mode="linear_symmetric", dtype="int8", weight_threshold=512)
+            config = cto.OptimizationConfig(global_config=op_config)
+            ct_model = cto.linear_quantize_weights(ct_model, config)
     ct_model.save(f)
     return f, ct_model
 
@@ -1285,7 +1296,7 @@ def pipeline_coreml(model, im, file, names, y, mlmodel, prefix=colorstr("CoreML 
 
     # 3. Create NMS protobuf
     nms_spec = ct.proto.Model_pb2.Model()
-    nms_spec.specificationVersion = 5
+    nms_spec.specificationVersion = spec.specificationVersion  # inherit from model to support both mlmodel and mlpackage
     for i in range(2):
         decoder_output = model._spec.description.output[i].SerializeToString()
         nms_spec.description.input.add()
@@ -1338,7 +1349,7 @@ def pipeline_coreml(model, im, file, names, y, mlmodel, prefix=colorstr("CoreML 
     pipeline.spec.description.output[1].ParseFromString(nms_model._spec.description.output[1].SerializeToString())
 
     # Update metadata
-    pipeline.spec.specificationVersion = 5
+    pipeline.spec.specificationVersion = spec.specificationVersion  # inherit from model
     pipeline.spec.description.metadata.versionString = "https://github.com/ultralytics/yolov5"
     pipeline.spec.description.metadata.shortDescription = "https://github.com/ultralytics/yolov5"
     pipeline.spec.description.metadata.author = "glenn.jocher@ultralytics.com"
@@ -1603,7 +1614,7 @@ def parse_opt(known=False):
     parser.add_argument("--dynamic", action="store_true", help="ONNX/TF/TensorRT: dynamic axes")
     parser.add_argument("--cache", type=str, default="", help="TensorRT: timing cache file path")
     parser.add_argument("--simplify", action="store_true", help="ONNX: simplify model")
-    parser.add_argument("--mlmodel", action="store_true", help="CoreML: Export in *.mlmodel format")
+    parser.add_argument("--mlmodel", action="store_true", help="CoreML: export legacy *.mlmodel (neuralnetwork) instead of *.mlpackage (mlprogram, default)")
     parser.add_argument("--opset", type=int, default=17, help="ONNX: opset version")
     parser.add_argument("--verbose", action="store_true", help="TensorRT: verbose log")
     parser.add_argument("--workspace", type=int, default=4, help="TensorRT: workspace size (GB)")
