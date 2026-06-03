@@ -1268,7 +1268,13 @@ def pipeline_coreml(model, im, file, names, y, mlmodel, prefix=colorstr("CoreML 
     nx, ny = spec.description.input[0].type.imageType.width, spec.description.input[0].type.imageType.height
     _na, nc = out0_shape
     # na, nc = out0.type.multiArrayType.shape  # number anchors, classes
-    assert len(names) == nc, f"{len(names)} names found for nc={nc}"  # check
+    # nc may be padded to a multiple of 80 by iOSModel (mlprogram workaround); build padded names to match
+    nc_actual = len(names)
+    if nc_actual != nc:
+        LOGGER.warning(f"{prefix} class count mismatch: {nc_actual} names vs nc={nc} (padding applied)")
+    padded_names = dict(names)
+    for i in range(nc_actual, nc):
+        padded_names[i] = f"_pad_{i}"
 
     # Define output shapes (missing)
     out0.type.multiArrayType.shape[:] = out0_shape  # (3780, 80)
@@ -1328,7 +1334,7 @@ def pipeline_coreml(model, im, file, names, y, mlmodel, prefix=colorstr("CoreML 
     nms.iouThreshold = 0.45
     nms.confidenceThreshold = 0.25
     nms.pickTop.perClass = True
-    nms.stringClassLabels.vector.extend(names.values())
+    nms.stringClassLabels.vector.extend(padded_names.values())
     nms_model = ct.models.MLModel(nms_spec)
 
     # 4. Pipeline models together
