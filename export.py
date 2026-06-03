@@ -9,7 +9,7 @@ TorchScript                 | `torchscript`                 | yolov5s.torchscrip
 ONNX                        | `onnx`                        | yolov5s.onnx
 OpenVINO                    | `openvino`                    | yolov5s_openvino_model/
 TensorRT                    | `engine`                      | yolov5s.engine
-CoreML                      | `coreml`                      | yolov5s.mlmodel
+CoreML                      | `coreml`                      | yolov5s.mlpackage
 TensorFlow SavedModel       | `saved_model`                 | yolov5s_saved_model/
 TensorFlow GraphDef         | `pb`                          | yolov5s.pb
 TensorFlow Lite             | `tflite`                      | yolov5s.tflite
@@ -30,7 +30,7 @@ Inference:
                                  yolov5s.onnx               # ONNX Runtime or OpenCV DNN with --dnn
                                  yolov5s_openvino_model     # OpenVINO
                                  yolov5s.engine             # TensorRT
-                                 yolov5s.mlmodel            # CoreML (macOS-only)
+                                 yolov5s.mlpackage          # CoreML (macOS-only)
                                  yolov5s_saved_model        # TensorFlow SavedModel
                                  yolov5s.pb                 # TensorFlow GraphDef
                                  yolov5s.tflite             # TensorFlow Lite
@@ -625,6 +625,11 @@ def export_coreml(model, im, file, int8, half, nms, mlmodel, prefix=colorstr("Co
                 ct_model = ct.models.neural_network.quantization_utils.quantize_weights(ct_model, bits, mode)
         elif bits == 8:
             # linear quantization (INT8) — better ANE/GPU utilization than palettization for mlpackage
+            # coremltools.optimize.coreml requires coremltools >= 7.0
+            from packaging.version import Version
+
+            if Version(ct.__version__) < Version("7.0"):
+                raise RuntimeError(f"INT8 quantization for .mlpackage requires coremltools >= 7.0 (found {ct.__version__})")
             import coremltools.optimize.coreml as cto
 
             op_config = cto.OpLinearQuantizerConfig(mode="linear_symmetric", dtype="int8", weight_threshold=512)
