@@ -46,6 +46,6 @@ setuptools>=70.0.0 # Snyk vulnerability fix
 # Extras ----------------------------------------------------------------------
 # ipython  # interactive notebook
 # mss  # screenshots
-albumentations==1.4.18  # augmentations
+albumentations==1.4.24  # augmentations
 # pycocotools>=2.0.6  # COCO mAP
 urllib3>=2.6.0 ; python_version > "3.8" # not directly required, pinned by Snyk to avoid a vulnerability
