@@ -30,10 +30,12 @@ python fo_to_yolo.py \\
   --fo-tags tag_one tag_two \\   # optional pre-filtering by FiftyOne sample tags; omit to use all samples in the dataset
   --seed 42
   # A description will be prompted interactively and is required to proceed.
+
+On a lossy network, prefix the command with GODEBUG=http2client=0 so W&B uploads over
+HTTP/1.1 (one connection per file instead of one or two shared HTTP/2 connections).
 """
 
 import argparse
-import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -226,19 +228,8 @@ def register_in_wandb(
     """Upload dataset artifact to W&B. If wandb_org is provided, also link to the Dataset Registry."""
     import wandb
 
-    # wandb-core sends every file over one or two multiplexed HTTP/2
-    # connections, which drops to ~1 MB/s on a lossy uplink. HTTP/1.1 opens
-    # one connection per concurrent file upload (~20x faster at ~3% loss).
-    prev_godebug = os.environ.get("GODEBUG")
-    os.environ["GODEBUG"] = f"{prev_godebug},http2client=0" if prev_godebug else "http2client=0"
-    try:
-        with wandb_isolated_dirs():
-            _do_register_in_wandb(wandb, export_dir, dataset_name, params, wandb_entity, wandb_collection, wandb_org)
-    finally:
-        if prev_godebug is None:
-            os.environ.pop("GODEBUG", None)
-        else:
-            os.environ["GODEBUG"] = prev_godebug
+    with wandb_isolated_dirs():
+        _do_register_in_wandb(wandb, export_dir, dataset_name, params, wandb_entity, wandb_collection, wandb_org)
 
 
 def _do_register_in_wandb(
@@ -267,9 +258,8 @@ def _do_register_in_wandb(
         )
         # Dataset files (images, labels, dataset.yaml, class_map.yaml,
         # label_distribution.png, description.txt) are all inside out_dir.
-        # Nothing changes the folder during upload, so upload it in place:
-        # W&B's staging copy (a full duplicate of the dataset, very slow for
-        # ~400k files on a spinning disk) and its cache copy are skipped.
+        # Skip W&B's staging/cache copies (slow for large datasets).
+        # Safe because nothing writes to the folder during upload.
         artifact.add_dir(str(Path(export_dir) / dataset_name), skip_cache=True, policy="immutable")
 
         logged = run.log_artifact(artifact)
