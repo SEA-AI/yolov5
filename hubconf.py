@@ -34,10 +34,9 @@ def _create(name, pretrained=True, channels=3, classes=80, autoshape=True, verbo
     Examples:
         ```python
         import torch
-        from ultralytics import _create
 
         # Load an official YOLOv5s model with pretrained weights
-        model = _create('yolov5s')
+        model = torch.hub.load("ultralytics/yolov5", "yolov5n")
 
         # Load a custom model from a local checkpoint
         model = _create('path/to/custom_model.pt', pretrained=False)
@@ -48,20 +47,22 @@ def _create(name, pretrained=True, channels=3, classes=80, autoshape=True, verbo
 
     Notes:
         For more information on model loading and customization, visit the
-        [YOLOv5 PyTorch Hub Documentation](https://docs.ultralytics.com/yolov5/tutorials/pytorch_hub_model_loading/).
+        [YOLOv5 PyTorch Hub Documentation](https://docs.ultralytics.com/yolov5/tutorials/pytorch-hub-model-loading).
     """
+    import logging
     from pathlib import Path
 
     from models.common import AutoShape, DetectMultiBackend
     from models.experimental import attempt_load
     from models.yolo import ClassificationModel, DetectionModel, SegmentationModel
     from utils.downloads import attempt_download
-    from utils.general import LOGGER, ROOT, check_requirements, intersect_dicts, logging
+    from utils.general import LOGGER, ROOT, check_requirements, intersect_dicts
     from utils.torch_utils import select_device
 
+    prev_level = LOGGER.level
     if not verbose:
         LOGGER.setLevel(logging.WARNING)
-    check_requirements(ROOT / "requirements.txt", exclude=("opencv-python", "tensorboard", "thop"))
+    check_requirements(ROOT / "requirements.txt", exclude=("opencv-python", "tensorboard", "ultralytics-thop"))
     name = Path(name)
     path = name.with_suffix(".pt") if name.suffix == "" and not name.is_dir() else name  # checkpoint path
     try:
@@ -72,12 +73,12 @@ def _create(name, pretrained=True, channels=3, classes=80, autoshape=True, verbo
                 if autoshape:
                     if model.pt and isinstance(model.model, ClassificationModel):
                         LOGGER.warning(
-                            "WARNING ⚠️ YOLOv5 ClassificationModel is not yet AutoShape compatible. "
+                            "YOLOv5 ClassificationModel is not yet AutoShape compatible. "
                             "You must pass torch tensors in BCHW to this model, i.e. shape(1,3,224,224)."
                         )
                     elif model.pt and isinstance(model.model, SegmentationModel):
                         LOGGER.warning(
-                            "WARNING ⚠️ YOLOv5 SegmentationModel is not yet AutoShape compatible. "
+                            "YOLOv5 SegmentationModel is not yet AutoShape compatible. "
                             "You will not be able to run inference with this model."
                         )
                     else:
@@ -94,14 +95,15 @@ def _create(name, pretrained=True, channels=3, classes=80, autoshape=True, verbo
                 model.load_state_dict(csd, strict=False)  # load
                 if len(ckpt["model"].names) == classes:
                     model.names = ckpt["model"].names  # set class names attribute
-        if not verbose:
-            LOGGER.setLevel(logging.INFO)  # reset to default
         return model.to(device)
 
     except Exception as e:
-        help_url = "https://docs.ultralytics.com/yolov5/tutorials/pytorch_hub_model_loading"
+        help_url = "https://docs.ultralytics.com/yolov5/tutorials/pytorch-hub-model-loading"
         s = f"{e}. Cache may be out of date, try `force_reload=True` or see {help_url} for help."
-        raise Exception(s) from e
+        raise RuntimeError(s) from e
+
+    finally:
+        LOGGER.setLevel(prev_level)  # restore on both paths, LOGGER is shared with ultralytics
 
 
 def custom(path="path/to/model.pt", autoshape=True, _verbose=True, device=None):
@@ -130,7 +132,7 @@ def custom(path="path/to/model.pt", autoshape=True, _verbose=True, device=None):
 
     Notes:
         For more details on loading models from PyTorch Hub:
-        https://docs.ultralytics.com/yolov5/tutorials/pytorch_hub_model_loading
+        https://docs.ultralytics.com/yolov5/tutorials/pytorch-hub-model-loading
     """
     return _create(path, autoshape=autoshape, verbose=_verbose, device=device)
 
@@ -156,10 +158,9 @@ def yolov5n(pretrained=True, channels=3, classes=80, autoshape=True, _verbose=Tr
     Examples:
         ```python
         import torch
-        from ultralytics import yolov5n
 
         # Load the YOLOv5-nano model with defaults
-        model = yolov5n()
+        model = torch.hub.load("ultralytics/yolov5", "yolov5n")
 
         # Load the YOLOv5-nano model with a specific device
         model = yolov5n(device='cuda')
@@ -277,8 +278,8 @@ def yolov5l(pretrained=True, channels=3, classes=80, autoshape=True, _verbose=Tr
 
 
 def yolov5x(pretrained=True, channels=3, classes=80, autoshape=True, _verbose=True, device=None):
-    """Perform object detection using the YOLOv5-xlarge model with options for pretraining, input channels, class count,
-    autoshaping, verbosity, and device specification.
+    """Create the YOLOv5-xlarge model with options for pretraining, input channels, class count, autoshaping, verbosity,
+    and device specification.
 
     Args:
         pretrained (bool): If True, loads pretrained weights into the model. Defaults to True.
@@ -386,8 +387,6 @@ def yolov5m6(pretrained=True, channels=3, classes=80, autoshape=True, _verbose=T
 
     Returns:
         torch.nn.Module: The YOLOv5-medium-P6 model.
-        Refer to the PyTorch Hub models documentation: https://pytorch.org/hub/ultralytics_yolov5 for
-        additional details.
 
     Examples:
         ```python
@@ -400,6 +399,8 @@ def yolov5m6(pretrained=True, channels=3, classes=80, autoshape=True, _verbose=T
     Notes:
         - The model can be loaded with pre-trained weights for better performance on specific tasks.
         - The autoshape feature simplifies input handling by allowing various popular data formats.
+        - Refer to the PyTorch Hub models documentation for additional details:
+          https://pytorch.org/hub/ultralytics_yolov5
     """
     return _create("yolov5m6", pretrained, channels, classes, autoshape, _verbose, device)
 

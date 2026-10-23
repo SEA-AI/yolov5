@@ -13,7 +13,6 @@ from models.common import Classify, DetectMultiBackend
 from models.experimental import attempt_load
 from models.yolo import BaseModel, Detect, DetectionModel
 from utils.general import LOGGER, scale_boxes
-from utils.plots import feature_visualization
 from utils.torch_utils import is_obb_weights, select_device
 
 ERR_MODEL_PT_PATH = "model must be a path to a .pt file"
@@ -150,7 +149,7 @@ class HorizonModel(BaseModel):
         model.model.add_module(c_pitch.i, c_pitch)
         model.model.add_module(c_theta.i, c_theta)
 
-    def _forward_once(self, x, profile=False, visualize=False):
+    def _forward_once(self, x, profile=False):
         x_pitch, x_theta = None, None
         y, dt = [], []  # outputs
         for m in self.model:
@@ -165,8 +164,6 @@ class HorizonModel(BaseModel):
             else:
                 x = m(x)  # run
                 y.append(x if m.i in self.save else None)  # save output
-                if visualize:
-                    feature_visualization(x, m.type, m.i, save_dir=visualize)
 
         return (x_pitch, x_theta)
 
@@ -399,9 +396,9 @@ class YOLO(nn.Module):
         if len(self._det_models) > 1:
             LOGGER.info(f"YOLO ensemble: {len(self._det_models)} models, merged classes={self.names}")
 
-    def forward(self, x, profile=False, visualize=False):
+    def forward(self, x, profile=False):
         """Run all models on input and merge their detections into one tensor."""
-        preds = [m(x, profile, visualize) for m in self._det_models]
+        preds = [m(x, profile) for m in self._det_models]
         det_tensors = [p[0] if isinstance(p, tuple) else p for p in preds]
         return (det_tensors[0],) if len(det_tensors) == 1 else (self._merge_detections(det_tensors),)
 
@@ -634,7 +631,7 @@ class AHOY(YOLO):
         """Load horizon detection model."""
         raise NotImplementedError("Subclasses should implement this method")
 
-    def forward(self, x, profile=False, visualize=False):
+    def forward(self, x, profile=False):
         """Forward pass through models."""
         raise NotImplementedError("Subclasses should implement this method")
 
@@ -660,10 +657,10 @@ class AHOYv1(AHOY):
         """Load horizon detection model."""
         return HorizonModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
 
-    def forward(self, x, profile=False, visualize=False):
+    def forward(self, x, profile=False):
         """Forward pass through models."""
-        objects = self.obj_det(x, profile, visualize)
-        pitch, theta = self.hor_det(x, profile, visualize)
+        objects = self.obj_det(x, profile)
+        pitch, theta = self.hor_det(x, profile)
         return objects, pitch, theta
 
     @staticmethod
@@ -702,9 +699,9 @@ class AHOYv2(AHOY):
         """Load horizon detection model."""
         return OBBModel(hor_det_weights, device=device, fp16=fp16, fuse=fuse)
 
-    def forward(self, x, profile=False, visualize=False):
+    def forward(self, x, profile=False):
         """Forward pass through models."""
-        objects = self.obj_det(x, profile, visualize)
+        objects = self.obj_det(x, profile)
         horizons = self.hor_det(x)
         return objects, horizons
 
@@ -767,10 +764,10 @@ class DAN(nn.Module):
         self.model_a = model_a
         self.model_b = model_b
 
-    def forward(self, x_1, x_2, profile=False, visualize=False):
+    def forward(self, x_1, x_2, profile=False):
         """Forward pass through models."""
-        out_a = self.model_a(x_1, profile, visualize)
-        out_b = self.model_b(x_2, profile, visualize)
+        out_a = self.model_a(x_1, profile)
+        out_b = self.model_b(x_2, profile)
         return out_a, out_b
 
     def register_io_hooks(self):
