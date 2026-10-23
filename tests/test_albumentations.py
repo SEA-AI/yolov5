@@ -12,11 +12,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 A = pytest.importorskip("albumentations")
 
-import horizon.transforms as T  # noqa: E402
-import utils.albumentations16 as A16  # noqa: E402
-import utils.albumextensions as Ax  # noqa: E402
-from utils.augmentations import Albumentations, PreAlbumentations  # noqa: E402
-from utils.dataloaders import imread_16bit_compatible  # noqa: E402
+import horizon.transforms as T
+import utils.albumentations16 as A16
+import utils.albumextensions as Ax
+from utils.augmentations import Albumentations, PreAlbumentations
+from utils.dataloaders import imread_16bit_compatible
 
 
 def coded_image(h, w):

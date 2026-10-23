@@ -39,7 +39,7 @@ def geometric_augment(imgsz: Tuple[int,int]) -> List[BasicTransform]:
         Ax.ResizeIfNeeded(max_size_hw=imgsz),
         A.HorizontalFlip(p=0.5),
         A.PadIfNeeded(
-            min_height=imgsz[0], min_width=imgsz[1], border_mode=cv2.BORDER_CONSTANT, value=0
+            min_height=imgsz[0], min_width=imgsz[1], border_mode=cv2.BORDER_CONSTANT, fill=0
         ),
         A.Affine(
             p=0.75,
@@ -49,8 +49,8 @@ def geometric_augment(imgsz: Tuple[int,int]) -> List[BasicTransform]:
             balanced_scale=True,
             keep_ratio=True,
             fit_output=False,
-            mode=cv2.BORDER_CONSTANT,
-            cval=0,
+            border_mode=cv2.BORDER_CONSTANT,
+            fill=0,
         ),
     ]
 
@@ -75,7 +75,7 @@ def horizon_augment_rgb(
             [
                 A.RandomRain(p=1),
                 A.RandomSunFlare(p=1),
-                A.RandomFog(p=1, fog_coef_lower=0.1, fog_coef_upper=0.3),
+                A.RandomFog(p=1, fog_coef_range=(0.1, 0.3)),
             ],
             p=0.05,
         ),
@@ -85,7 +85,7 @@ def horizon_augment_rgb(
         A.HueSaturationValue(p=0.5),
         A.CLAHE(p=0.05),
         A.Blur(p=0.05),
-        A.ImageCompression(quality_lower=75, p=im_compression_prob),
+        A.ImageCompression(quality_range=(75, 100), p=im_compression_prob),
         # geometric transforms
         *geometric_augment(imgsz),
         # torch-related transforms
@@ -113,7 +113,7 @@ def horizon_base_rgb(imgsz: Tuple[int,int]) -> A.Compose:
                 min_height=imgsz[0],
                 min_width=imgsz[1],
                 border_mode=cv2.BORDER_CONSTANT,
-                value=0,
+                fill=0,
             ),  # letterbox
             # torch-related transforms
             A.Normalize(mean=0.0, std=1.0),
@@ -141,7 +141,7 @@ def horizon_augment_ir16bit(
         A16.NormalizeMinMax(p=1.0),
         A.UnsharpMask(p=0.5, threshold=5),
         A.ToRGB(p=1.0),
-        A.ImageCompression(quality_lower=50, p=im_compression_prob),
+        A.ImageCompression(quality_range=(50, 100), p=im_compression_prob),
         # geometric transforms
         *geometric_augment(imgsz),
         # torch-related transforms
@@ -189,7 +189,7 @@ def horizon_base_ir16bit(
                 min_height=imgsz[0],
                 min_width=imgsz[1],
                 border_mode=cv2.BORDER_CONSTANT,
-                value=0,
+                fill=0,
             ),  # letterbox
             # torch-related transforms
             A.Normalize(mean=0.0, std=1.0),

@@ -1,15 +1,14 @@
 """Custom augmentations following the Albumentations API."""
 
-import random
-from typing import Dict, List, Optional, Tuple, Union, cast, Any
+from __future__ import annotations
 
+from typing import Any, List, Optional, Tuple, Union
+
+import albumentations as A
 import cv2
 import numpy as np
-import albumentations as A
-from albumentations.augmentations.geometric import functional as F
-from albumentations.core.pydantic import InterpolationType
-from albumentations.core.types import ScaleIntType
 from albumentations.augmentations.crops import functional as fcrops
+from albumentations.augmentations.geometric import functional as F
 from albumentations.core.transforms_interface import BaseTransformInitSchema, DualTransform
 from pydantic import ValidationInfo, field_validator
 
@@ -33,52 +32,18 @@ class SafeRandomCrop(A.RandomCrop):
 
     """
 
-    def get_params_dependent_on_data(
-        self,
-        params: dict[str, Any],
-        data: dict[str, Any],
-    ) -> dict[str, tuple[int, int, int, int]]:
+    def get_params_dependent_on_data(self, params: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
         image_shape = params["shape"][:2]
-
-        image_height, image_width = image_shape
 
         # do not throw an error if the crop size exceeds the image size
         # instead, dynamically adjust the crop size to the image size
-        height = min(self.height, image_height)
-        width = min(self.width, image_width)
+        height = min(self.height, image_shape[0])
+        width = min(self.width, image_shape[1])
 
-        h_start = random.random()
-        w_start = random.random()
+        h_start = self.py_random.random()
+        w_start = self.py_random.random()
         crop_coords = fcrops.get_crop_coords(image_shape, (height, width), h_start, w_start)
-        return {"crop_coords": crop_coords}
-
-
-class MaxSizeHWInitSchema(BaseTransformInitSchema):
-    max_size: int | list[int] | None
-    max_size_hw: tuple[int, int] | None
-    interpolation: InterpolationType
-
-    @field_validator("max_size")
-    @classmethod
-    def check_max_size(cls, v: ScaleIntType | None, info: ValidationInfo) -> int | list[int] | None:
-        if v is None:
-            return None
-        result = v if isinstance(v, (list, tuple)) else [v]
-        for value in result:
-            if value < 1:
-                raise ValueError(f"{info.field_name} must be bigger or equal to 1.")
-        return cast(Union[int, List[int], None], result)
-
-    @field_validator("max_size_hw")
-    @classmethod
-    def check_max_size_hw(cls, v: tuple[int, int] | None, info: ValidationInfo) -> tuple[int, int] | None:
-        if v is None:
-            return None
-        if not isinstance(v, tuple) or len(v) != 2:
-            raise ValueError(f"{info.field_name} must be a tuple of two integers")
-        if any(x < 1 for x in v):
-            raise ValueError(f"All values in {info.field_name} must be bigger or equal to 1")
-        return v
+        return {"crop_coords": crop_coords, "pad_params": None}
 
 
 class ResizeIfNeeded(DualTransform):
@@ -93,93 +58,67 @@ class ResizeIfNeeded(DualTransform):
         p (float): probability of applying the transform. Default: 1.
 
     Targets:
-        image, mask, bboxes, keypoints
+        image, mask, keypoints
 
     Image types:
         uint8, float32
     """
 
-    class InitSchema(MaxSizeHWInitSchema):
-        pass
+    class InitSchema(BaseTransformInitSchema):
+        max_size: Optional[Union[int, List[int]]]
+        max_size_hw: Optional[Tuple[int, int]]
+        interpolation: int
+
+        @field_validator("max_size", "max_size_hw")
+        @classmethod
+        def check_positive(cls, v: Any, info: ValidationInfo) -> Any:
+            if v is not None and any(x < 1 for x in (v if isinstance(v, (list, tuple)) else [v])):
+                raise ValueError(f"{info.field_name} must be bigger or equal to 1.")
+            return v
 
     def __init__(
         self,
-        max_size: Optional[Union[int, list]] = None,
+        max_size: Optional[Union[int, List[int]]] = None,
         max_size_hw: Optional[Tuple[int, int]] = None,
         interpolation: int = cv2.INTER_LINEAR,
-        always_apply: bool = False,
         p: float = 1,
     ):
-        super().__init__(p=p, always_apply=always_apply)
+        super().__init__(p=p)
+        if not any([max_size, max_size_hw]):
+            raise ValueError("At least one of max_size or max_size_hw must be set")
         self.max_size = max_size
         self.max_size_hw = max_size_hw
         self.interpolation = interpolation
 
-        if not any([max_size, max_size_hw]):
-            raise ValueError("At least one of max_size or max_size_hw must be set")
-
+    @staticmethod
     def _compute_scale(
-        self, height: int, width: int, max_size: Optional[int], max_size_hw: Optional[Tuple[int, int]]
+        height: int, width: int, max_size: Optional[int], max_size_hw: Optional[Tuple[int, int]]
     ) -> float:
-        """Compute the scale factor based on image dimensions and maximum constraints."""
-        scale_height = scale_width = 1.0
-
+        """Compute the downscale factor (<= 1) that satisfies the maximum constraints."""
+        scale = 1.0
         if max_size_hw is not None:
-            max_height, max_width = max_size_hw
-            if height > max_height:
-                scale_height = max_height / height
-            if width > max_width:
-                scale_width = max_width / width
+            scale = min(scale, max_size_hw[0] / height, max_size_hw[1] / width)
+        if max_size is not None:
+            scale = min(scale, max_size / max(height, width))
+        return scale
 
-        if max_size is not None and max(height, width) > max_size:
-            scale = max_size / max(height, width)
-            scale_height = scale_width = min(scale_height, scale_width, scale)
-
-        return min(scale_height, scale_width)
-
-    def apply(
-        self,
-        img: np.ndarray,
-        max_size: Optional[int] = None,
-        max_size_hw: Optional[Tuple[int, int]] = None,
-        interpolation: int = cv2.INTER_LINEAR,
-        **params,
-    ) -> np.ndarray:
+    def apply(self, img: np.ndarray, max_size: Optional[int] = None, **params) -> np.ndarray:
         height, width = img.shape[:2]
-        final_scale = self._compute_scale(height, width, max_size, max_size_hw)
-
-        if final_scale < 1.0:  # Only resize if we need to scale down
-            new_height = int(height * final_scale)
-            new_width = int(width * final_scale)
-            return cv2.resize(img, (new_width, new_height), interpolation=interpolation)
-
+        scale = self._compute_scale(height, width, max_size, self.max_size_hw)
+        if scale < 1.0:  # only scale down
+            return cv2.resize(img, (int(width * scale), int(height * scale)), interpolation=self.interpolation)
         return img
 
-    def apply_to_bbox(self, bbox: np.ndarray, **params) -> np.ndarray:
-        # Bounding box coordinates are scale invariant
-        return bbox
+    def apply_to_keypoints(self, keypoints: np.ndarray, max_size: Optional[int] = None, **params) -> np.ndarray:
+        height, width = params["shape"][:2]
+        scale = self._compute_scale(height, width, max_size, self.max_size_hw)
+        return F.keypoints_scale(keypoints, scale, scale)
 
-    def apply_to_keypoints(
-        self,
-        keypoints: np.ndarray,
-        max_size: Optional[int] = None,
-        max_size_hw: Optional[Tuple[int, int]] = None,
-        **params,
-    ) -> np.ndarray:
-        height = params["rows"]
-        width = params["cols"]
-
-        final_scale = self._compute_scale(height, width, max_size, max_size_hw)
-        final_scale = min(1.0, final_scale)  # don't scale up
-
-        return F.keypoints_scale(keypoints, final_scale, final_scale)
-
-    def get_params(self) -> Dict[str, Optional[int]]:
-        max_size = None
-        if self.max_size:
-            max_size = self.max_size if isinstance(self.max_size, int) else random.choice(self.max_size)
-
-        return {"max_size": max_size, "max_size_hw": self.max_size_hw}
+    def get_params(self) -> dict[str, Optional[int]]:
+        max_size = self.max_size
+        if isinstance(max_size, (list, tuple)):
+            max_size = self.py_random.choice(max_size)
+        return {"max_size": max_size}
 
     def get_transform_init_args_names(self) -> Tuple[str, ...]:
         return ("max_size", "max_size_hw", "interpolation")
