@@ -29,7 +29,6 @@ from fiftyone import ViewField as F
 from torch.nn import CrossEntropyLoss, Dropout
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 wandb.login()
 
@@ -43,7 +42,7 @@ from horizon.dataloaders import get_train_dataloader, get_val_dataloader  # noqa
 from models.custom import HorizonModel  # noqa: E402
 from utils.autobatch import check_train_batch_size  # noqa: E402
 from utils.downloads import attempt_download  # noqa: E402
-from utils.general import LOGGER, TQDM_BAR_FORMAT, check_amp  # noqa: E402
+from utils.general import LOGGER, TQDM, check_amp  # noqa: E402
 from utils.horizon import pitch_theta_to_points  # noqa: E402
 from utils.torch_utils import ModelEMA, smart_optimizer  # noqa: E402
 
@@ -114,10 +113,9 @@ def update(
     LOGGER.info(s)
 
     # iterate over batches
-    pbar = tqdm(
+    pbar = TQDM(
         enumerate(train_dataloader),
         total=len(train_dataloader),
-        bar_format=TQDM_BAR_FORMAT,
     )
 
     for i, data in pbar:
@@ -206,10 +204,9 @@ def evaluate(
     )
     LOGGER.info(s)
     # iterate over batches
-    pbar = tqdm(
+    pbar = TQDM(
         enumerate(val_dataloader),
         total=len(val_dataloader),
-        bar_format=TQDM_BAR_FORMAT,
     )
 
     for i, data in pbar:

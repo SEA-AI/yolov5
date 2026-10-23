@@ -20,6 +20,7 @@ Usage - formats:
 """
 
 import argparse
+import glob
 import json
 import os
 import subprocess
@@ -29,7 +30,6 @@ from pathlib import Path
 import numpy as np
 import torch
 import yaml
-from tqdm import tqdm
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -42,7 +42,7 @@ from utils.callbacks import Callbacks
 from utils.dataloaders import create_dataloader
 from utils.general import (
     LOGGER,
-    TQDM_BAR_FORMAT,
+    TQDM,
     Profile,
     check_dataset,
     check_img_size,
@@ -53,45 +53,14 @@ from utils.general import (
     increment_path,
     non_max_suppression,
     print_args,
+    save_one_txt,
     scale_boxes,
     xywh2xyxy,
     xyxy2xywh,
 )
-from utils.metrics import ConfusionMatrix, ap_per_class, box_iou
+from utils.metrics import ConfusionMatrix, ap_per_class, process_batch
 from utils.plots import output_to_target, plot_images, plot_val_study
 from utils.torch_utils import select_device, smart_inference_mode
-
-
-def save_one_txt(predn, save_conf, shape, file):
-    """Saves one detection result to a txt file in normalized xywh format, optionally including confidence.
-
-    Args:
-        predn (torch.Tensor): Predicted bounding boxes and associated confidence scores and classes in xyxy format,
-            tensor of shape (N, 6) where N is the number of detections.
-        save_conf (bool): If True, saves the confidence scores along with the bounding box coordinates.
-        shape (tuple): Shape of the original image as (height, width).
-        file (str | Path): File path where the result will be saved.
-
-    Returns:
-        None
-
-    Examples:
-        ```python
-        predn = torch.tensor([[10, 20, 30, 40, 0.9, 1]])  # example prediction
-        save_one_txt(predn, save_conf=True, shape=(640, 480), file="output.txt")
-        ```
-
-    Notes:
-        The xyxy bounding box format represents the coordinates (xmin, ymin, xmax, ymax).
-        The xywh format represents the coordinates (center_x, center_y, width, height) and is normalized by the width and
-        height of the image.
-    """
-    gn = torch.tensor(shape)[[1, 0, 1, 0]]  # normalization gain whwh
-    for *xyxy, conf, cls in predn.tolist():
-        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-        line = (cls, *xywh, conf) if save_conf else (cls, *xywh)  # label format
-        with open(file, "a") as f:
-            f.write(("%g " * len(line)).rstrip() % line + "\n")
 
 
 def save_one_json(predn, jdict, path, class_map):
@@ -140,49 +109,6 @@ def save_one_json(predn, jdict, path, class_map):
         )
 
 
-def process_batch(detections, labels, iouv, agnostic=False):
-    """Return a correct prediction matrix given detections and labels at various IoU thresholds.
-
-    Args:
-        detections (np.ndarray): Array of shape (N, 6) where each row corresponds to a detection with format [x1, y1,
-            x2, y2, conf, class].
-        labels (np.ndarray): Array of shape (M, 5) where each row corresponds to a ground truth label with format
-            [class, x1, y1, x2, y2].
-        iouv (np.ndarray): Array of IoU thresholds to evaluate at.
-        agnostic (bool): If True, detections are evaluated as true positives regardless of class.
-
-    Returns:
-        correct (np.ndarray): A binary array of shape (N, len(iouv)) indicating whether each detection is a true
-            positive for each IoU threshold. There are 10 IoU levels used in the evaluation.
-
-    Examples:
-        ```python
-        detections = np.array([[50, 50, 200, 200, 0.9, 1], [30, 30, 150, 150, 0.7, 0]])
-        labels = np.array([[1, 50, 50, 200, 200]])
-        iouv = np.linspace(0.5, 0.95, 10)
-        correct = process_batch(detections, labels, iouv)
-        ```
-
-    Notes:
-        - This function is used as part of the evaluation pipeline for object detection models.
-        - IoU (Intersection over Union) is a common evaluation metric for object detection performance.
-    """
-    correct = np.zeros((detections.shape[0], iouv.shape[0])).astype(bool)
-    iou = box_iou(labels[:, 1:], detections[:, :4])
-    correct_class = labels[:, 0:1] == detections[:, 5] if not agnostic else torch.ones_like(iou, dtype=torch.bool)
-    for i in range(len(iouv)):
-        x = torch.where((iou >= iouv[i]) & correct_class)  # IoU > threshold and classes match
-        if x[0].shape[0]:
-            matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1).cpu().numpy()  # [label, detect, iou]
-            if x[0].shape[0] > 1:
-                matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
-                # matches = matches[matches[:, 2].argsort()[::-1]]
-                matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
-            correct[matches[:, 1].astype(int), i] = True
-    return torch.tensor(correct, dtype=torch.bool, device=iouv.device)
-
-
 @smart_inference_mode()
 def run(
     data,
@@ -211,7 +137,7 @@ def run(
     dataloader=None,
     save_dir=Path(""),
     plots=True,
-    callbacks=Callbacks(),
+    callbacks=None,
     compute_loss=None,
     hyp=None,
 ):
@@ -251,7 +177,7 @@ def run(
         compute_loss (function, optional): Loss function for training. Default is None.
 
     Returns:
-        dict: Contains performance metrics including precision, recall, mAP50, and mAP50-95.
+        (tuple): ((mp, mr, map50, map, box_loss, obj_loss, cls_loss), per-class mAP50-95 array, speeds tuple (ms)).
     """
     if model is not None:
         hyp = model.hyp  # hyperparameters
@@ -262,6 +188,8 @@ def run(
     else:
         LOGGER.info("Hyperparameters missing, default values used.")
 
+    if callbacks is None:
+        callbacks = Callbacks()
     # Initialize/load model and set device
     training = model is not None
     if training:  # called by train.py
@@ -338,7 +266,7 @@ def run(
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class = [], [], [], []
     callbacks.run("on_val_start")
-    pbar = tqdm(dataloader, desc=s, bar_format=TQDM_BAR_FORMAT)  # progress bar
+    pbar = TQDM(dataloader, desc=s)  # progress bar
     for batch_i, (im, targets, paths, shapes) in enumerate(pbar):
         callbacks.run("on_val_batch_start")
         with dt[0]:
@@ -435,7 +363,7 @@ def run(
     pf = "%22s" + "%11i" * 2 + "%11.3g" * 4  # print format
     LOGGER.info(pf % ("all", seen, nt.sum(), mp, mr, map50, map))
     if nt.sum() == 0:
-        LOGGER.warning(f"WARNING ⚠️ no labels found in {task} set, can not compute metrics without labels")
+        LOGGER.warning(f"no labels found in {task} set, can not compute metrics without labels")
 
     # Print results per class
     if (verbose or (nc < 50 and not training)) and nc > 1 and len(stats):
@@ -591,13 +519,13 @@ def main(opt):
         $ python val.py --weights yolov5s.pt --data coco128.yaml --img 640
         ```
     """
-    check_requirements(ROOT / "requirements.txt", exclude=("tensorboard", "thop"))
+    check_requirements(ROOT / "requirements.txt", exclude=("tensorboard", "ultralytics-thop"))
 
     if opt.task in ("train", "val", "test"):  # run normally
         if opt.conf_thres > 0.001:  # https://github.com/ultralytics/yolov5/issues/1466
-            LOGGER.info(f"WARNING ⚠️ confidence threshold {opt.conf_thres} > 0.001 produces invalid results")
+            LOGGER.warning(f"confidence threshold {opt.conf_thres} > 0.001 produces invalid results")
         if opt.save_hybrid:
-            LOGGER.info("WARNING ⚠️ --save-hybrid will return high mAP from hybrid labels, not from predictions alone")
+            LOGGER.warning("--save-hybrid will return high mAP from hybrid labels, not from predictions alone")
         run(**vars(opt))
 
     else:
@@ -619,7 +547,7 @@ def main(opt):
                     r, _, t = run(**vars(opt), plots=False)
                     y.append(r + t)  # results and times
                 np.savetxt(f, y, fmt="%10.4g")  # save
-            subprocess.run(["zip", "-r", "study.zip", "study_*.txt"])
+            subprocess.run(["zip", "-r", "study.zip", *glob.glob("study_*.txt")], check=False)
             plot_val_study(x=x)  # plot
         else:
             raise NotImplementedError(f'--task {opt.task} not in ("train", "val", "test", "speed", "study")')
