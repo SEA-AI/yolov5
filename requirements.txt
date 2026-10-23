@@ -3,7 +3,7 @@
 
 # Base ------------------------------------------------------------------------
 matplotlib>=3.3
-numpy>=1.23.5,<2.0.0
+numpy>=1.23.5
 opencv-python>=4.6.0
 pillow>=10.3.0
 psutil  # system resources
@@ -43,5 +43,5 @@ setuptools>=70.0.0 # Snyk vulnerability fix
 # Extras ----------------------------------------------------------------------
 # ipython  # interactive notebook
 # mss  # screenshots
-albumentations==1.4.18  # augmentations
+albumentations>=2.0.8  # augmentations (2.x API: SafeRandomCrop, ResizeIfNeeded, 16-bit transforms)
 # pycocotools>=2.0.6  # COCO mAP
