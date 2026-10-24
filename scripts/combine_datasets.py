@@ -194,7 +194,6 @@ def combine_datasets(
             )
 
         # --- Download, copy, and immediately cleanup each dataset in turn ---
-        local_dirs: list[str] = []
         classes = None
         has_train, has_val = False, False
 
@@ -209,7 +208,6 @@ def combine_datasets(
             else:
                 local_path, tmp_parent = entry, None
 
-            local_dirs.append(local_path)
 
             yaml_path = Path(local_path) / "dataset.yaml"
             if not yaml_path.exists():
@@ -273,7 +271,7 @@ def combine_datasets(
         # --- W&B ---
         if run is not None:
             print("\nRegistering in Weights & Biases...")
-            metadata = {"datasets": local_dirs, "classes": names_as_list(classes)}
+            metadata = {"datasets": datasets, "classes": names_as_list(classes)}
             run.config.update(metadata)
             log_dataset(run, output_path, wandb_collection, description, metadata, wandb_org)
 
