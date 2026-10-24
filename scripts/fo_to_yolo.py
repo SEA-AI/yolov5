@@ -51,7 +51,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 from fiftyone import ViewField as F
-from utils.dataset_utils import validate_split, wandb_isolated_dirs
+from utils.dataset_utils import log_dataset, validate_split, wandb_isolated_dirs
 
 
 # ---------------------------------------------------------------------------
@@ -228,59 +228,19 @@ def register_in_wandb(
     """Upload dataset artifact to W&B. If wandb_org is provided, also link to the Dataset Registry."""
     import wandb
 
-    with wandb_isolated_dirs():
-        _do_register_in_wandb(wandb, export_dir, dataset_name, params, wandb_entity, wandb_collection, wandb_org)
-
-
-def _do_register_in_wandb(
-    wandb,
-    export_dir: str,
-    dataset_name: str,
-    params: dict,
-    wandb_entity: str,
-    wandb_collection: str,
-    wandb_org: str | None,
-) -> None:
     # A run is required by W&B to upload artifacts. We use a fixed internal
     # project so it never appears alongside training experiments.
-    with wandb.init(
+    with wandb_isolated_dirs(), wandb.init(
         entity=wandb_entity,
         project="dataset-registry",
         name=wandb_collection,
         config=params,
         job_type="dataset-upload",
     ) as run:
-        artifact = wandb.Artifact(
-            name=wandb_collection,
-            type="dataset",
-            description=params.get("description", ""),
-            metadata=params,
-        )
         # Dataset files (images, labels, dataset.yaml, class_map.yaml,
         # label_distribution.png, description.txt) are all inside out_dir.
-        # Skip W&B's staging/cache copies (slow for large datasets).
-        # Safe because nothing writes to the folder during upload.
-        artifact.add_dir(str(Path(export_dir) / dataset_name), skip_cache=True, policy="immutable")
-
-        logged = run.log_artifact(artifact)
-        logged.wait()
-        LOGGER.info(f"  artifact '{wandb_collection}' uploaded to project '{wandb_entity}/dataset-registry'")
-
-        if wandb_org:
-            try:
-                run.link_artifact(
-                    logged,
-                    target_path=f"{wandb_org}/wandb-registry-dataset/{wandb_collection}",
-                )
-                LOGGER.info(f"  artifact linked to registry collection '{wandb_org}/{wandb_collection}'")
-            except wandb.errors.CommError as e:
-                if "Duplicate entry" in str(e):
-                    LOGGER.warning(
-                        f"  artifact version already linked to registry collection '{wandb_org}/{wandb_collection}' "
-                        f"(content unchanged since last upload — no new version created)"
-                    )
-                else:
-                    raise
+        folder = Path(export_dir) / dataset_name
+        log_dataset(run, folder, wandb_collection, params.get("description", ""), params, wandb_org)
 
 
 # ---------------------------------------------------------------------------

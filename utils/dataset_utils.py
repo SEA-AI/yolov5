@@ -1,11 +1,10 @@
-import logging
 import os
 import shutil
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-LOGGER = logging.getLogger(__name__)
+from utils import LOGGER
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
 
@@ -57,3 +56,28 @@ def wandb_isolated_dirs():
             os.environ["WANDB_DATA_DIR"] = prev_data
         else:
             os.environ.pop("WANDB_DATA_DIR", None)
+
+
+def log_dataset(run, folder: Path, name: str, description: str, metadata: dict, wandb_org: str | None = None) -> None:
+    """Upload *folder* as a dataset artifact in *run*; if *wandb_org* is set, also link it to the Dataset Registry."""
+    import wandb
+
+    artifact = wandb.Artifact(name=name, type="dataset", description=description, metadata=metadata)
+    # Skip W&B's staging/cache copies (slow for large datasets).
+    # Safe because nothing writes to the folder during upload.
+    artifact.add_dir(str(folder), skip_cache=True, policy="immutable")
+    logged = run.log_artifact(artifact)
+    logged.wait()
+    LOGGER.info(f"  artifact '{name}' uploaded to '{run.entity}/{run.project}'")
+
+    if wandb_org:
+        try:
+            run.link_artifact(logged, target_path=f"{wandb_org}/wandb-registry-dataset/{name}")
+            LOGGER.info(f"  artifact linked to registry collection '{wandb_org}/{name}'")
+        except wandb.errors.CommError as e:
+            if "Duplicate entry" not in str(e):
+                raise
+            LOGGER.warning(
+                f"  artifact version already linked to registry collection '{wandb_org}/{name}' "
+                f"(content unchanged since last upload — no new version created)"
+            )
