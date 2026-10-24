@@ -31,8 +31,7 @@ python fo_to_yolo.py \\
   --seed 42
   # A description will be prompted interactively and is required to proceed.
 
-On a lossy network, prefix the command with GODEBUG=http2client=0 so W&B uploads over
-HTTP/1.1 (one connection per file instead of one or two shared HTTP/2 connections).
+On a lossy network, prefix with GODEBUG=http2client=0 (W&B uploads over HTTP/1.1).
 """
 
 import argparse
@@ -256,10 +255,7 @@ def _do_register_in_wandb(
             description=params.get("description", ""),
             metadata=params,
         )
-        # Dataset files (images, labels, dataset.yaml, class_map.yaml,
-        # label_distribution.png, description.txt) are all inside out_dir.
-        # Skip W&B's staging/cache copies (slow for large datasets).
-        # Safe because nothing writes to the folder during upload.
+        # immutable is safe: nothing writes to the folder during upload.
         artifact.add_dir(str(Path(export_dir) / dataset_name), skip_cache=True, policy="immutable")
 
         logged = run.log_artifact(artifact)
