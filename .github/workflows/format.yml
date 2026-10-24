@@ -42,7 +42,7 @@ jobs:
             If this is a 🐛 Bug Report, please provide a **minimum reproducible example** to help us debug it.
             If this is a custom training ❓ Question, please provide as much information as possible, including dataset image examples and training logs, and verify you are following our [Tips for Best Training Results](https://docs.ultralytics.com/guides/model-training-tips).
             ## Requirements
-            [**Python>=3.8.0**](https://www.python.org/) with all [requirements.txt](https://github.com/ultralytics/yolov5/blob/master/requirements.txt) installed including [**PyTorch>=1.8**](https://pytorch.org/get-started/locally/). To get started:
+            [**Python>=3.9.0**](https://www.python.org/) with all [requirements.txt](https://github.com/ultralytics/yolov5/blob/master/requirements.txt) installed including [**PyTorch>=1.8**](https://pytorch.org/get-started/locally/). To get started:
             ```bash
             git clone https://github.com/ultralytics/yolov5  # clone
             cd yolov5

@@ -10,8 +10,6 @@ import numpy as np
 from ..augmentations import box_candidates
 from ..general import resample_segments, segment2box
 
-BACKGROUND_COLOR = (0, 0, 0)  # black
-
 
 def mixup(im, labels, segments, im2, labels2, segments2):
     """Applies MixUp augmentation blending two images, labels, and segments with a random ratio.
@@ -26,7 +24,7 @@ def mixup(im, labels, segments, im2, labels2, segments2):
 
 
 def random_perspective(
-    im, targets=(), segments=(), degrees=10, translate=0.1, scale=0.1, shear=10, perspective=0.0, border=(0, 0)
+    im, targets=(), segments=(), degrees=10, translate=0.1, scale=0.1, shear=10, perspective=0.0, border=(0, 0), fill=114
 ):
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-10, 10))
     # targets = [cls, xyxy]
@@ -66,9 +64,9 @@ def random_perspective(
     M = T @ S @ R @ P @ C  # order of operations (right to left) is IMPORTANT
     if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():  # image changed
         if perspective:
-            im = cv2.warpPerspective(im, M, dsize=(width, height), borderValue=BACKGROUND_COLOR)
+            im = cv2.warpPerspective(im, M, dsize=(width, height), borderValue=(fill,) * 3)
         else:  # affine
-            im = cv2.warpAffine(im, M[:2], dsize=(width, height), borderValue=BACKGROUND_COLOR)
+            im = cv2.warpAffine(im, M[:2], dsize=(width, height), borderValue=(fill,) * 3)
 
     new_segments = []
     if n := len(targets):

@@ -34,13 +34,12 @@ uv pip install pytest pytest-cov                                                
 python -m pytest tests/                                                                               # run all tests (python -m puts the repo root on sys.path; bare pytest fails imports)
 python -m pytest tests/ -m "not network"                                                              # skip tests that hit the live network
 python -m pytest tests/test_invariant_export.py::test_export_edgetpu_no_shell_true                    # run one test
-python -m pytest tests/ --cov                                                                         # coverage (local convention only; CI runs no pytest or coverage)
+python -m pytest tests/ --cov                                                                         # coverage (local only; CI runs pytest without coverage)
 ruff format . && ruff check --fix .                                                                   # format + lint (line-length 120 from pyproject.toml [tool.ruff])
 python train.py --imgsz 64 --batch 32 --weights yolov5n.pt --cfg yolov5n.yaml --epochs 1 --device cpu # CI-style smoke train
 ```
 
-- CI (`.github/workflows/ci-testing.yml`) runs end-to-end train/val/detect/export smoke scripts and `benchmarks.py` — not pytest — on push/PR to `master` plus a daily cron.
-- Tests matrix: ubuntu-latest, windows-latest, macos-14 on latest Python 3.x, plus ubuntu on Python 3.8 with torch 1.8.0 (repo floors: `requires-python >=3.8`, `torch>=1.8.0`); the Benchmarks job is pinned to Python 3.11.
+- CI (`.github/workflows/ci-testing.yml`) runs end-to-end train/val/detect/export smoke scripts, `pytest tests/` and `benchmarks.py` on push/PR to `master` and `develop` plus a daily cron.
 
 ## Architecture
 
