@@ -58,7 +58,6 @@ LOCAL_RANK = int(os.getenv("LOCAL_RANK", "-1"))  # https://pytorch.org/docs/stab
 RANK = int(os.getenv("RANK", "-1"))
 WORLD_SIZE = int(os.getenv("WORLD_SIZE", "1"))
 PIN_MEMORY = str(os.getenv("PIN_MEMORY", "true")).lower() == "true"  # global pin_memory for dataloaders
-FILL_VALUE = 0  # 114
 
 # Get orientation exif tag
 for orientation in ExifTags.TAGS:
@@ -499,6 +498,7 @@ class LoadImagesAndLabels(Dataset):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
+        self.fill = (hyp or {}).get("fill", 114)  # padding/border pixel value
         self.image_weights = image_weights
         self.rect = False if image_weights else rect
         self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
@@ -721,7 +721,7 @@ class LoadImagesAndLabels(Dataset):
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+            img, ratio, pad = letterbox(img, shape, (self.fill,) * 3, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
             if labels.size:  # normalized xywh to pixel xyxy format
@@ -736,6 +736,7 @@ class LoadImagesAndLabels(Dataset):
                     scale=hyp["scale"],
                     shear=hyp["shear"],
                     perspective=hyp["perspective"],
+                    fill=self.fill,
                 )
 
         nl = len(labels)  # number of labels
@@ -853,7 +854,7 @@ class LoadImagesAndLabels(Dataset):
 
             # place img in img4
             if i == 0:  # top left
-                img4 = np.full((s * 2, s * 2, img.shape[2]), FILL_VALUE, dtype=np.uint8)  # base image with 4 tiles
+                img4 = np.full((s * 2, s * 2, img.shape[2]), self.fill, dtype=np.uint8)  # base image with 4 tiles
                 x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
                 x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
             elif i == 1:  # top right
@@ -895,6 +896,7 @@ class LoadImagesAndLabels(Dataset):
             shear=self.hyp["shear"],
             perspective=self.hyp["perspective"],
             border=self.mosaic_border,
+            fill=self.fill,
         )  # border to remove
 
         return img4, labels4

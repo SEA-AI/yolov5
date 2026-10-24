@@ -249,6 +249,7 @@ def run(
             pad=pad,
             rect=rect,
             workers=workers,
+            hyp=hyp,
             prefix=colorstr(f"{task}: "),
         )[0]
 
