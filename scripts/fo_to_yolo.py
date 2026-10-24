@@ -34,6 +34,8 @@ python fo_to_yolo.py \\
 On a lossy network, prefix with GODEBUG=http2client=0 (W&B uploads over HTTP/1.1).
 """
 
+from __future__ import annotations
+
 import argparse
 import shutil
 from dataclasses import dataclass

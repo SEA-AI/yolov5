@@ -37,6 +37,8 @@ python combine_datasets.py \\
   # A description will be prompted interactively and is required to proceed.
 """
 
+from __future__ import annotations
+
 import argparse
 import shutil
 import tempfile
