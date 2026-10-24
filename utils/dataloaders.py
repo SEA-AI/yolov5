@@ -212,7 +212,7 @@ class _RepeatSampler:
 class LoadScreenshots:
     """Loads and processes screenshots for YOLOv5 detection from specified screen regions using mss."""
 
-    def __init__(self, source, img_size=640, stride=32, auto=True, transforms=None):
+    def __init__(self, source, img_size=640, stride=32, auto=True, transforms=None, fill=114):
         """Initializes a screenshot dataloader for YOLOv5 with specified source region, image size, stride, auto, and
         transforms.
 
@@ -233,6 +233,7 @@ class LoadScreenshots:
         self.stride = stride
         self.transforms = transforms
         self.auto = auto
+        self.fill = fill  # letterbox padding value
         self.mode = "stream"
         self.frame = 0
         self.sct = mss.mss()
@@ -259,7 +260,7 @@ class LoadScreenshots:
         if self.transforms:
             im = self.transforms(im0)  # transforms
         else:
-            im = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
+            im = letterbox(im0, self.img_size, (self.fill,) * 3, stride=self.stride, auto=self.auto)[0]  # padded resize
             im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             im = np.ascontiguousarray(im)  # contiguous
         self.frame += 1
@@ -269,7 +270,7 @@ class LoadScreenshots:
 class LoadImages:
     """YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`."""
 
-    def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
+    def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1, fill=114):
         """Initializes YOLOv5 loader for images/videos, supporting glob patterns, directories, and lists of paths."""
         if isinstance(path, str) and Path(path).suffix == ".txt":  # *.txt file with img/vid/dir on each line
             path = Path(path).read_text().strip().splitlines()
@@ -296,6 +297,7 @@ class LoadImages:
         self.video_flag = [False] * ni + [True] * nv
         self.mode = "image"
         self.auto = auto
+        self.fill = fill  # letterbox padding value
         self.transforms = transforms  # optional
         self.vid_stride = vid_stride  # video frame-rate stride
         if any(videos):
@@ -346,7 +348,7 @@ class LoadImages:
         if self.transforms:
             im = self.transforms(im0)  # transforms
         else:
-            im = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
+            im = letterbox(im0, self.img_size, (self.fill,) * 3, stride=self.stride, auto=self.auto)[0]  # padded resize
             im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             im = np.ascontiguousarray(im)  # contiguous
 
@@ -378,7 +380,9 @@ class LoadImages:
 class LoadStreams:
     """Loads and processes video streams for YOLOv5, supporting various sources including YouTube and IP cameras."""
 
-    def __init__(self, sources="file.streams", img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
+    def __init__(
+        self, sources="file.streams", img_size=640, stride=32, auto=True, transforms=None, vid_stride=1, fill=114
+    ):
         """Initializes a stream loader for processing video streams with YOLOv5, supporting various sources including
         YouTube.
         """
@@ -421,6 +425,7 @@ class LoadStreams:
         s = np.stack([letterbox(x, img_size, stride=stride, auto=auto)[0].shape for x in self.imgs])
         self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
         self.auto = auto and self.rect
+        self.fill = fill  # letterbox padding value
         self.transforms = transforms  # optional
         if not self.rect:
             LOGGER.warning("Stream shapes differ. For optimal performance supply similarly-shaped streams.")
@@ -459,7 +464,7 @@ class LoadStreams:
         if self.transforms:
             im = np.stack([self.transforms(x) for x in im0])  # transforms
         else:
-            im = np.stack([letterbox(x, self.img_size, stride=self.stride, auto=self.auto)[0] for x in im0])  # resize
+            im = np.stack([letterbox(x, self.img_size, (self.fill,) * 3, stride=self.stride, auto=self.auto)[0] for x in im0])  # resize
             im = im[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW
             im = np.ascontiguousarray(im)  # contiguous
 

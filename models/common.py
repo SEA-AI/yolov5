@@ -478,6 +478,7 @@ class DetectMultiBackend(nn.Module):
         fp16 &= pt or jit or onnx or engine or triton  # FP16
         nhwc = coreml or saved_model or pb or tflite or edgetpu  # BHWC formats (vs torch BCWH)
         stride = 32  # default stride
+        fill = 114  # letterbox padding value, from the checkpoint hyp for PyTorch weights
         cuda = torch.cuda.is_available() and device.type != "cpu"  # use CUDA
         if not (pt or triton):
             w = attempt_download(w)  # download if not local
@@ -486,6 +487,7 @@ class DetectMultiBackend(nn.Module):
             model = attempt_load(weights if isinstance(weights, list) else w, device=device, inplace=True, fuse=fuse)
             stride = max(int(model.stride.max()), 32)  # model stride
             names = model.module.names if hasattr(model, "module") else model.names  # get class names
+            fill = (getattr(model, "hyp", None) or {}).get("fill", fill)
             model.half() if fp16 else model.float()
             self.model = model  # explicitly assign for to(), cpu(), cuda(), half()
         elif jit:  # TorchScript
@@ -858,6 +860,7 @@ class AutoShape(nn.Module):
             LOGGER.info("Adding AutoShape... ")
         copy_attr(self, model, include=("yaml", "nc", "hyp", "names", "stride", "abc"), exclude=())  # copy attributes
         self.dmb = isinstance(model, DetectMultiBackend)  # DetectMultiBackend() instance
+        self.fill = model.fill if self.dmb else (getattr(model, "hyp", None) or {}).get("fill", 114)
         self.pt = not self.dmb or model.pt  # PyTorch model
         self.model = model.eval()
         if self.pt:
@@ -921,7 +924,7 @@ class AutoShape(nn.Module):
                 shape1.append([int(y * g) for y in s])
                 ims[i] = im if im.data.contiguous else np.ascontiguousarray(im)  # update
             shape1 = [make_divisible(x, self.stride) for x in np.array(shape1).max(0)]  # inf shape
-            x = [letterbox(im, shape1, auto=False)[0] for im in ims]  # pad
+            x = [letterbox(im, shape1, (self.fill,) * 3, auto=False)[0] for im in ims]  # pad
             x = np.ascontiguousarray(np.array(x).transpose((0, 3, 1, 2)))  # stack and BHWC to BCHW
             x = torch.from_numpy(x).to(p.device).type_as(p) / 255  # uint8 to fp16/32
 

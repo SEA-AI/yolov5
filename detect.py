@@ -177,12 +177,12 @@ def run(
     bs = 1  # batch_size
     if webcam:
         view_img = check_imshow(warn=True)
-        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+        dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride, fill=model.fill)
         bs = len(dataset)
     elif screenshot:
-        dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt)
+        dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt, fill=model.fill)
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride, fill=model.fill)
     vid_path, vid_writer = [None] * bs, [None] * bs
 
     # Define the path for the CSV file
