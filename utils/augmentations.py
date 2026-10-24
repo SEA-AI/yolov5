@@ -15,8 +15,6 @@ from utils.general import LOGGER, check_version, colorstr, resample_segments, se
 
 IMAGENET_MEAN = 0.485, 0.456, 0.406  # RGB mean
 IMAGENET_STD = 0.229, 0.224, 0.225  # RGB standard deviation
-BACKGROUND_COLOR = (0, 0, 0)  # border color for padding
-FILL_VALUE = 0  # 114
 
 
 class Albumentations:
@@ -111,7 +109,7 @@ def augment_hsv(im, hgain=0.5, sgain=0.5, vgain=0.5):
         cv2.cvtColor(im_hsv, cv2.COLOR_HSV2BGR, dst=im)  # no return needed
 
 
-def letterbox(im, new_shape=(640, 640), color=BACKGROUND_COLOR, auto=True, scaleFill=False, scaleup=True, stride=32):
+def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
     """Resizes and pads image to new_shape with stride-multiple constraints, returns resized image, ratio, padding."""
     shape = im.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
@@ -145,7 +143,7 @@ def letterbox(im, new_shape=(640, 640), color=BACKGROUND_COLOR, auto=True, scale
 
 
 def random_perspective(
-    im, targets=(), segments=(), degrees=10, translate=0.1, scale=0.1, shear=10, perspective=0.0, border=(0, 0)
+    im, targets=(), segments=(), degrees=10, translate=0.1, scale=0.1, shear=10, perspective=0.0, border=(0, 0), fill=114
 ):
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(0.1, 0.1), scale=(0.9, 1.1), shear=(-10, 10))
     # targets = [cls, xyxy]
@@ -185,9 +183,9 @@ def random_perspective(
     M = T @ S @ R @ P @ C  # order of operations (right to left) is IMPORTANT
     if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():  # image changed
         if perspective:
-            im = cv2.warpPerspective(im, M, dsize=(width, height), borderValue=BACKGROUND_COLOR)
+            im = cv2.warpPerspective(im, M, dsize=(width, height), borderValue=(fill,) * 3)
         else:  # affine
-            im = cv2.warpAffine(im, M[:2], dsize=(width, height), borderValue=BACKGROUND_COLOR)
+            im = cv2.warpAffine(im, M[:2], dsize=(width, height), borderValue=(fill,) * 3)
 
     if n := len(targets):
         use_segments = any(x.any() for x in segments) and len(segments) == n
