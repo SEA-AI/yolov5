@@ -43,7 +43,7 @@ import tempfile
 from contextlib import ExitStack
 from pathlib import Path
 
-from utils.dataset_utils import log_dataset, validate_split, wandb_isolated_dirs
+from utils.dataset_utils import log_dataset, validate_split
 
 import yaml
 
@@ -76,14 +76,9 @@ def validate_classes(yamls: list[tuple[Path, dict]]) -> list[str]:
 
 
 def download_artifact(ref: str, download_dir: str | None, run=None) -> tuple[str, str | None]:
-    """Download a W&B artifact and return (local_path, tmp_dir_to_cleanup).
+    """Download a W&B artifact (through *run* for lineage, if given) and return (local_path, tmp_dir_to_cleanup).
 
-    With a *run*, the artifact is fetched via run.use_artifact so it is also
-    recorded as a lineage input. The W&B cache is always skipped
-    (skip_cache=True). If *download_dir* is None the artifact is placed under a
-    fresh temp directory in /tmp and the temp parent is returned as the second
-    element for the caller to clean up. If *download_dir* is given the second
-    element is None.
+    tmp_dir_to_cleanup is None when *download_dir* is given.
     """
     artifact_name = ref.split("/")[-1].split(":")[0]
     if run is not None:
@@ -187,8 +182,7 @@ def combine_datasets(
         if register_wandb:
             import wandb
 
-            # Open the run first so W&B sources download through it (lineage + download in one step).
-            stack.enter_context(wandb_isolated_dirs())
+            # Download sources through the run so lineage records the same version.
             run = stack.enter_context(
                 wandb.init(
                     entity=wandb_entity,

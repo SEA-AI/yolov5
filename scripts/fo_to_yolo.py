@@ -31,8 +31,7 @@ python fo_to_yolo.py \\
   --seed 42
   # A description will be prompted interactively and is required to proceed.
 
-On a lossy network, prefix the command with GODEBUG=http2client=0 so W&B uploads over
-HTTP/1.1 (one connection per file instead of one or two shared HTTP/2 connections).
+On a lossy network, prefix with GODEBUG=http2client=0 (W&B uploads over HTTP/1.1).
 """
 
 import argparse
@@ -51,7 +50,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 from fiftyone import ViewField as F
-from utils.dataset_utils import log_dataset, validate_split, wandb_isolated_dirs
+from utils.dataset_utils import log_dataset, validate_split
 
 
 # ---------------------------------------------------------------------------
@@ -228,19 +227,15 @@ def register_in_wandb(
     """Upload dataset artifact to W&B. If wandb_org is provided, also link to the Dataset Registry."""
     import wandb
 
-    # A run is required by W&B to upload artifacts. We use a fixed internal
-    # project so it never appears alongside training experiments.
-    with wandb_isolated_dirs(), wandb.init(
+    # Own project keeps dataset runs out of training experiments.
+    with wandb.init(
         entity=wandb_entity,
         project="dataset-registry",
         name=wandb_collection,
         config=params,
         job_type="dataset-upload",
     ) as run:
-        # Dataset files (images, labels, dataset.yaml, class_map.yaml,
-        # label_distribution.png, description.txt) are all inside out_dir.
-        folder = Path(export_dir) / dataset_name
-        log_dataset(run, folder, wandb_collection, params.get("description", ""), params, wandb_org)
+        log_dataset(run, Path(export_dir) / dataset_name, wandb_collection, params.get("description", ""), params, wandb_org)
 
 
 # ---------------------------------------------------------------------------
