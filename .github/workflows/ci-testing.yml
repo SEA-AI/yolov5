@@ -57,14 +57,19 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.14"] # consistent Python minor across runners and reruns
         model: [yolov5n]
+    permissions:
+      contents: read
+      code-quality: write # upload coverage
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }} # PR head, so coverage lines map to the diff
       - uses: ultralytics/actions/setup-uv@main
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install requirements
         run: |
-          uv pip install -r requirements.txt pytest flask --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match
+          uv pip install -r requirements.txt pytest pytest-cov flask --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match
         shell: bash # for Windows compatibility
       - name: Update macOS security policy
         if: runner.os == 'macOS'
@@ -76,7 +81,14 @@ jobs:
           yolo checks
           uv pip list
       - name: Pytest
-        run: python -m pytest tests/
+        run: python -m pytest tests/ --cov=. --cov-report=xml
+      - name: Upload coverage
+        if: matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/upload-code-coverage@v1
+        with:
+          file: coverage.xml
+          language: Python
+          label: code-coverage/pytest
       - name: Test detection
         shell: bash # for Windows compatibility
         run: |
