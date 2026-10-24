@@ -58,7 +58,6 @@ LOCAL_RANK = int(os.getenv("LOCAL_RANK", "-1"))  # https://pytorch.org/docs/stab
 RANK = int(os.getenv("RANK", "-1"))
 WORLD_SIZE = int(os.getenv("WORLD_SIZE", "1"))
 PIN_MEMORY = str(os.getenv("PIN_MEMORY", "true")).lower() == "true"  # global pin_memory for dataloaders
-FILL_VALUE = 0  # 114
 
 # Get orientation exif tag
 for orientation in ExifTags.TAGS:
@@ -213,7 +212,7 @@ class _RepeatSampler:
 class LoadScreenshots:
     """Loads and processes screenshots for YOLOv5 detection from specified screen regions using mss."""
 
-    def __init__(self, source, img_size=640, stride=32, auto=True, transforms=None):
+    def __init__(self, source, img_size=640, stride=32, auto=True, transforms=None, fill=114):
         """Initializes a screenshot dataloader for YOLOv5 with specified source region, image size, stride, auto, and
         transforms.
 
@@ -234,6 +233,7 @@ class LoadScreenshots:
         self.stride = stride
         self.transforms = transforms
         self.auto = auto
+        self.fill = fill  # letterbox padding value
         self.mode = "stream"
         self.frame = 0
         self.sct = mss.mss()
@@ -260,7 +260,7 @@ class LoadScreenshots:
         if self.transforms:
             im = self.transforms(im0)  # transforms
         else:
-            im = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
+            im = letterbox(im0, self.img_size, (self.fill,) * 3, stride=self.stride, auto=self.auto)[0]  # padded resize
             im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             im = np.ascontiguousarray(im)  # contiguous
         self.frame += 1
@@ -270,7 +270,7 @@ class LoadScreenshots:
 class LoadImages:
     """YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`."""
 
-    def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
+    def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1, fill=114):
         """Initializes YOLOv5 loader for images/videos, supporting glob patterns, directories, and lists of paths."""
         if isinstance(path, str) and Path(path).suffix == ".txt":  # *.txt file with img/vid/dir on each line
             path = Path(path).read_text().strip().splitlines()
@@ -297,6 +297,7 @@ class LoadImages:
         self.video_flag = [False] * ni + [True] * nv
         self.mode = "image"
         self.auto = auto
+        self.fill = fill  # letterbox padding value
         self.transforms = transforms  # optional
         self.vid_stride = vid_stride  # video frame-rate stride
         if any(videos):
@@ -347,7 +348,7 @@ class LoadImages:
         if self.transforms:
             im = self.transforms(im0)  # transforms
         else:
-            im = letterbox(im0, self.img_size, stride=self.stride, auto=self.auto)[0]  # padded resize
+            im = letterbox(im0, self.img_size, (self.fill,) * 3, stride=self.stride, auto=self.auto)[0]  # padded resize
             im = im.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
             im = np.ascontiguousarray(im)  # contiguous
 
@@ -379,7 +380,9 @@ class LoadImages:
 class LoadStreams:
     """Loads and processes video streams for YOLOv5, supporting various sources including YouTube and IP cameras."""
 
-    def __init__(self, sources="file.streams", img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
+    def __init__(
+        self, sources="file.streams", img_size=640, stride=32, auto=True, transforms=None, vid_stride=1, fill=114
+    ):
         """Initializes a stream loader for processing video streams with YOLOv5, supporting various sources including
         YouTube.
         """
@@ -422,6 +425,7 @@ class LoadStreams:
         s = np.stack([letterbox(x, img_size, stride=stride, auto=auto)[0].shape for x in self.imgs])
         self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
         self.auto = auto and self.rect
+        self.fill = fill  # letterbox padding value
         self.transforms = transforms  # optional
         if not self.rect:
             LOGGER.warning("Stream shapes differ. For optimal performance supply similarly-shaped streams.")
@@ -460,7 +464,7 @@ class LoadStreams:
         if self.transforms:
             im = np.stack([self.transforms(x) for x in im0])  # transforms
         else:
-            im = np.stack([letterbox(x, self.img_size, stride=self.stride, auto=self.auto)[0] for x in im0])  # resize
+            im = np.stack([letterbox(x, self.img_size, (self.fill,) * 3, stride=self.stride, auto=self.auto)[0] for x in im0])  # resize
             im = im[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW
             im = np.ascontiguousarray(im)  # contiguous
 
@@ -499,6 +503,7 @@ class LoadImagesAndLabels(Dataset):
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
+        self.fill = (hyp or {}).get("fill", 114)  # padding/border pixel value
         self.image_weights = image_weights
         self.rect = False if image_weights else rect
         self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
@@ -721,7 +726,7 @@ class LoadImagesAndLabels(Dataset):
 
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+            img, ratio, pad = letterbox(img, shape, (self.fill,) * 3, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
             if labels.size:  # normalized xywh to pixel xyxy format
@@ -736,6 +741,7 @@ class LoadImagesAndLabels(Dataset):
                     scale=hyp["scale"],
                     shear=hyp["shear"],
                     perspective=hyp["perspective"],
+                    fill=self.fill,
                 )
 
         nl = len(labels)  # number of labels
@@ -853,7 +859,7 @@ class LoadImagesAndLabels(Dataset):
 
             # place img in img4
             if i == 0:  # top left
-                img4 = np.full((s * 2, s * 2, img.shape[2]), FILL_VALUE, dtype=np.uint8)  # base image with 4 tiles
+                img4 = np.full((s * 2, s * 2, img.shape[2]), self.fill, dtype=np.uint8)  # base image with 4 tiles
                 x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
                 x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
             elif i == 1:  # top right
@@ -895,6 +901,7 @@ class LoadImagesAndLabels(Dataset):
             shear=self.hyp["shear"],
             perspective=self.hyp["perspective"],
             border=self.mosaic_border,
+            fill=self.fill,
         )  # border to remove
 
         return img4, labels4

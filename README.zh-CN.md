@@ -63,7 +63,7 @@ pip install ultralytics
 <details open>
 <summary>安装</summary>
 
-克隆仓库并在 [**Python>=3.8.0**](https://www.python.org/) 环境中安装依赖项。确保您已安装 [**PyTorch>=1.8**](https://pytorch.org/get-started/locally/)。
+克隆仓库并在 [**Python>=3.9.0**](https://www.python.org/) 环境中安装依赖项。确保您已安装 [**PyTorch>=1.8**](https://pytorch.org/get-started/locally/)。
 
 ```bash
 # 克隆 YOLOv5 仓库

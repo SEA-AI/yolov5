@@ -63,7 +63,7 @@ See the [YOLOv5 Docs](https://docs.ultralytics.com/yolov5) for full documentatio
 <details open>
 <summary>Install</summary>
 
-Clone the repository and install dependencies in a [**Python>=3.8.0**](https://www.python.org/) environment. Ensure you have [**PyTorch>=1.8**](https://pytorch.org/get-started/locally/) installed.
+Clone the repository and install dependencies in a [**Python>=3.9.0**](https://www.python.org/) environment. Ensure you have [**PyTorch>=1.8**](https://pytorch.org/get-started/locally/) installed.
 
 ```bash
 # Clone the YOLOv5 repository

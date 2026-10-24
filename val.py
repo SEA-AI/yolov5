@@ -116,7 +116,7 @@ def run(
     batch_size=32,  # batch size
     imgsz=640,  # inference size (pixels)
     conf_thres=0.001,  # confidence threshold
-    iou_thres=0.1,  # NMS IoU threshold
+    iou_thres=0.6,  # NMS IoU threshold
     max_det=300,  # maximum detections per image
     task="val",  # train, val, test, speed or study
     device="",  # cuda device, i.e. 0 or 0,1,2,3 or cpu
@@ -249,6 +249,7 @@ def run(
             pad=pad,
             rect=rect,
             workers=workers,
+            hyp=hyp,
             prefix=colorstr(f"{task}: "),
         )[0]
 
@@ -490,7 +491,7 @@ def parse_opt():
     parser.add_argument("--exist-ok", action="store_true", help="existing project/name ok, do not increment")
     parser.add_argument("--half", action="store_true", help="use FP16 half-precision inference")
     parser.add_argument("--dnn", action="store_true", help="use OpenCV DNN for ONNX inference")
-    parser.add_argument("--hyp", type=str, default="", help="hyperparameters path")
+    parser.add_argument("--hyp", type=str, default=None, help="hyperparameters path")
 
     opt = parser.parse_args()
     opt.data = check_yaml(opt.data)  # check YAML
