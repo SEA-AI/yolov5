@@ -1,18 +1,16 @@
-import random
-from typing import Sequence, Union, Tuple, cast
+from typing import Sequence, Tuple, Union, cast
 
 import albumentations as A
 import cv2
 import numpy as np
-from albumentations.core.transforms_interface import (
-    ImageOnlyTransform,
-    BaseTransformInitSchema,
-)
-
 from albumentations.core.pydantic import (
     NonNegativeFloatRangeType,
     OnePlusFloatRangeType,
     ZeroOneRangeType,
+)
+from albumentations.core.transforms_interface import (
+    BaseTransformInitSchema,
+    ImageOnlyTransform,
 )
 
 
@@ -78,10 +76,9 @@ class CLAHE(ImageOnlyTransform):
         self,
         clip_limit: Union[float, Sequence[float]] = 4.0,
         tile_grid_size: Union[float, Sequence[float]] = (8, 8),
-        always_apply=False,
         p=0.5,
     ):
-        super().__init__(p=p, always_apply=always_apply)
+        super().__init__(p=p)
         self.clip_limit = cast(Tuple[float, float], clip_limit)
         self.tile_grid_size = cast(Tuple[int, int], tile_grid_size)
 
@@ -95,7 +92,7 @@ class CLAHE(ImageOnlyTransform):
         return clahe.apply(img)
 
     def get_params(self):
-        return {"clip_limit": random.uniform(self.clip_limit[0], self.clip_limit[1])}
+        return {"clip_limit": self.py_random.uniform(self.clip_limit[0], self.clip_limit[1])}
 
     def get_transform_init_args_names(self):
         """Returns names of arguments that are used in __init__ method of the transform."""
@@ -113,8 +110,8 @@ class NormalizeMinMax(ImageOnlyTransform):
         uint8, uint16
     """
 
-    def __init__(self, always_apply=False, p=0.5):
-        super().__init__(p=p, always_apply=always_apply)
+    def __init__(self, p=0.5):
+        super().__init__(p=p)
 
     def apply(self, img, **params):
         return cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
@@ -149,10 +146,9 @@ class Clip(ImageOnlyTransform):
         self,
         lower_limit: Union[float, Sequence[float]] = (0.1, 0.2),
         upper_limit: Union[float, Sequence[float]] = (0.8, 0.9),
-        always_apply=False,
         p=0.5,
     ):
-        super().__init__(p=p, always_apply=always_apply)
+        super().__init__(p=p)
         self.lower_limit = cast(Tuple[float, float], lower_limit)
         self.upper_limit = cast(Tuple[float, float], upper_limit)
 
@@ -164,8 +160,8 @@ class Clip(ImageOnlyTransform):
 
     def get_params(self):
         return {
-            "lower_limit": random.uniform(self.lower_limit[0], self.lower_limit[1]),
-            "upper_limit": random.uniform(self.upper_limit[0], self.upper_limit[1]),
+            "lower_limit": self.py_random.uniform(self.lower_limit[0], self.lower_limit[1]),
+            "upper_limit": self.py_random.uniform(self.upper_limit[0], self.upper_limit[1]),
         }
 
     def get_transform_init_args_names(self):
