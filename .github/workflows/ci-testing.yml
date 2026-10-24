@@ -64,7 +64,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install requirements
         run: |
-          uv pip install -r requirements.txt pytest flask --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match
+          uv pip install -r requirements.txt pytest pytest-cov flask --extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match
         shell: bash # for Windows compatibility
       - name: Update macOS security policy
         if: runner.os == 'macOS'
@@ -76,7 +76,8 @@ jobs:
           yolo checks
           uv pip list
       - name: Pytest
-        run: python -m pytest tests/
+        shell: bash # for Windows compatibility
+        run: python -m pytest tests/ --cov=. --cov-report=term --cov-report=markdown-append:"$GITHUB_STEP_SUMMARY" --cov-fail-under=13 # raise the floor as tests are added
       - name: Test detection
         shell: bash # for Windows compatibility
         run: |
