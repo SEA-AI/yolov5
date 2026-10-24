@@ -208,7 +208,6 @@ def combine_datasets(
             else:
                 local_path, tmp_parent = entry, None
 
-
             yaml_path = Path(local_path) / "dataset.yaml"
             if not yaml_path.exists():
                 raise FileNotFoundError(f"dataset.yaml not found in '{local_path}'")
