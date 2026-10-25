@@ -37,12 +37,15 @@ python combine_datasets.py \\
   # A description will be prompted interactively and is required to proceed.
 """
 
+from __future__ import annotations
+
 import argparse
 import shutil
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 
-from utils.dataset_utils import validate_split, wandb_isolated_dirs
+from utils.dataset_utils import log_dataset, validate_split
 
 import yaml
 
@@ -74,19 +77,18 @@ def validate_classes(yamls: list[tuple[Path, dict]]) -> list[str]:
     return yamls[0][1]["names"]  # return as-is from the source yaml
 
 
-def download_artifact(ref: str, download_dir: str | None) -> tuple[str, str | None]:
-    """Download a W&B artifact and return (local_path, tmp_dir_to_cleanup).
+def download_artifact(ref: str, download_dir: str | None, run=None) -> tuple[str, str | None]:
+    """Download a W&B artifact (through *run* for lineage, if given) and return (local_path, tmp_dir_to_cleanup).
 
-    The W&B cache is always skipped (skip_cache=True). If *download_dir* is
-    None the artifact is placed under a fresh temp directory in /tmp and the
-    temp parent is returned as the second element for the caller to clean up.
-    If *download_dir* is given the second element is None.
+    tmp_dir_to_cleanup is None when *download_dir* is given.
     """
-    import wandb
-
     artifact_name = ref.split("/")[-1].split(":")[0]
-    api = wandb.Api()
-    artifact = api.artifact(ref)
+    if run is not None:
+        artifact = run.use_artifact(ref)
+    else:
+        import wandb
+
+        artifact = wandb.Api().artifact(ref)
 
     if download_dir is None:
         tmp_parent = tempfile.mkdtemp(dir="/tmp", prefix="wandb_")
@@ -151,95 +153,6 @@ def copy_split(
 
 
 # ---------------------------------------------------------------------------
-# W&B registration
-# ---------------------------------------------------------------------------
-
-
-def register_in_wandb(
-    output_dir: Path,
-    description: str,
-    dataset_dirs: list[str],
-    classes: list[str],
-    wandb_refs: list[str],
-    wandb_entity: str,
-    wandb_collection: str,
-    wandb_org: str | None,
-) -> None:
-    """Upload combined dataset directory to W&B. W&B artifact entries are declared as lineage inputs."""
-    import wandb
-
-    with wandb_isolated_dirs():
-        _do_register_in_wandb(
-            wandb=wandb,
-            output_dir=output_dir,
-            description=description,
-            dataset_dirs=dataset_dirs,
-            classes=classes,
-            wandb_refs=wandb_refs,
-            wandb_entity=wandb_entity,
-            wandb_collection=wandb_collection,
-            wandb_org=wandb_org,
-        )
-
-
-def _do_register_in_wandb(
-    wandb,
-    output_dir: Path,
-    description: str,
-    dataset_dirs: list[str],
-    classes: list[str],
-    wandb_refs: list[str],
-    wandb_entity: str,
-    wandb_collection: str,
-    wandb_org: str | None,
-) -> None:
-    with wandb.init(
-        entity=wandb_entity,
-        project="dataset-registry",
-        name=wandb_collection,
-        job_type="dataset-combine",
-        config={
-            "description": description,
-            "datasets": dataset_dirs,
-            "classes": names_as_list(classes),
-            "source_artifacts": wandb_refs,
-        },
-    ) as run:
-        if wandb_refs:
-            print("  linking source artifacts for lineage...")
-            for ref in wandb_refs:
-                run.use_artifact(ref)
-
-        artifact = wandb.Artifact(
-            name=wandb_collection,
-            type="dataset",
-            description=description,
-            metadata={"datasets": dataset_dirs, "classes": names_as_list(classes)},
-        )
-        artifact.add_dir(str(output_dir))
-
-        logged = run.log_artifact(artifact)
-        logged.wait()
-        print(f"  artifact '{wandb_collection}' uploaded to '{wandb_entity}/dataset-registry'")
-
-        if wandb_org:
-            try:
-                run.link_artifact(
-                    logged,
-                    target_path=f"{wandb_org}/wandb-registry-dataset/{wandb_collection}",
-                )
-                print(f"  artifact linked to registry '{wandb_org}/{wandb_collection}'")
-            except wandb.errors.CommError as e:
-                if "Duplicate entry" in str(e):
-                    print(
-                        f"  artifact version already linked to registry '{wandb_org}/{wandb_collection}' "
-                        f"(content unchanged since last upload — no new version created)"
-                    )
-                else:
-                    raise
-
-
-# ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
 
@@ -266,98 +179,102 @@ def combine_datasets(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # --- Download, copy, and immediately cleanup each dataset in turn ---
-    local_dirs: list[str] = []
-    wandb_refs: list[str] = []
-    classes = None
-    has_train, has_val = False, False
+    with ExitStack() as stack:
+        run = None
+        if register_wandb:
+            import wandb
 
-    print(f"\nProcessing {len(datasets)} dataset(s)...")
-    for i, entry in enumerate(datasets):
-        if is_wandb_ref(entry):
-            if not download_dir:
-                print(f"  No --download-dir set, downloading to /tmp.")
-            print(f"  [{i}] Downloading artifact '{entry}'...")
-            local_path, tmp_parent = download_artifact(entry, download_dir)
-            print(f"      → {local_path}")
-            wandb_refs.append(entry)
-        else:
-            local_path, tmp_parent = entry, None
-
-        local_dirs.append(local_path)
-
-        yaml_path = Path(local_path) / "dataset.yaml"
-        if not yaml_path.exists():
-            raise FileNotFoundError(f"dataset.yaml not found in '{local_path}'")
-        y = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-        print(f"  [{i}] loaded {yaml_path}")
-
-        # Validate classes incrementally against the first dataset
-        dataset_names = names_as_list(y["names"])
-        if classes is None:
-            classes = y["names"]
-        elif tuple(names_as_list(classes)) != tuple(dataset_names):
-            raise ValueError(
-                f"Class mismatch in dataset {i} ('{local_path}'):\n"
-                f"  expected : {names_as_list(classes)}\n"
-                f"  got      : {dataset_names}"
+            # Download sources through the run so lineage records the same version.
+            run = stack.enter_context(
+                wandb.init(
+                    entity=wandb_entity,
+                    project="dataset-registry",
+                    name=wandb_collection,
+                    job_type="dataset-combine",
+                    config={"description": description, "source_artifacts": [d for d in datasets if is_wandb_ref(d)]},
+                )
             )
 
-        prefix = f"d{i}"
-        if copy_split(Path(local_path), y, "train", output_path, prefix):
-            has_train = True
-        if copy_split(Path(local_path), y, "val", output_path, prefix):
-            has_val = True
+        # --- Download, copy, and immediately cleanup each dataset in turn ---
+        classes = None
+        has_train, has_val = False, False
 
-        if tmp_parent:
-            shutil.rmtree(tmp_parent, ignore_errors=True)
-            print(f"  [{i}] temp download dir removed")
+        print(f"\nProcessing {len(datasets)} dataset(s)...")
+        for i, entry in enumerate(datasets):
+            if is_wandb_ref(entry):
+                if not download_dir:
+                    print(f"  No --download-dir set, downloading to /tmp.")
+                print(f"  [{i}] Downloading artifact '{entry}'...")
+                local_path, tmp_parent = download_artifact(entry, download_dir, run)
+                print(f"      → {local_path}")
+            else:
+                local_path, tmp_parent = entry, None
 
-    # --- Validate ---
-    print("  validating combined dataset...")
-    if has_train:
-        validate_split(output_path, "train")
-    if has_val:
-        validate_split(output_path, "val")
+            yaml_path = Path(local_path) / "dataset.yaml"
+            if not yaml_path.exists():
+                raise FileNotFoundError(f"dataset.yaml not found in '{local_path}'")
+            y = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+            print(f"  [{i}] loaded {yaml_path}")
 
-    # --- Write combined dataset.yaml ---
-    combined: dict = {"path": ".", "names": classes}
-    if has_train:
-        combined["train"] = "./images/train/"
-    if has_val:
-        combined["val"] = "./images/val/"
+            # Validate classes incrementally against the first dataset
+            dataset_names = names_as_list(y["names"])
+            if classes is None:
+                classes = y["names"]
+            elif tuple(names_as_list(classes)) != tuple(dataset_names):
+                raise ValueError(
+                    f"Class mismatch in dataset {i} ('{local_path}'):\n"
+                    f"  expected : {names_as_list(classes)}\n"
+                    f"  got      : {dataset_names}"
+                )
 
-    yaml_path = output_path / "dataset.yaml"
-    with open(yaml_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(combined, f, default_flow_style=False, allow_unicode=True)
+            prefix = f"d{i}"
+            if copy_split(Path(local_path), y, "train", output_path, prefix):
+                has_train = True
+            if copy_split(Path(local_path), y, "val", output_path, prefix):
+                has_val = True
 
-    print(f"\nCombined dataset written → {output_dir}")
-    if has_train:
-        n_train = len(list((output_path / "images" / "train").iterdir()))
-        print(f"  train images : {n_train}")
-    if has_val:
-        n_val = len(list((output_path / "images" / "val").iterdir()))
-        print(f"  val images   : {n_val}")
-    print(f"  classes      : {names_as_list(classes)}")
-    print(f"\nTrain with: python train.py --data {yaml_path}")
+            if tmp_parent:
+                shutil.rmtree(tmp_parent, ignore_errors=True)
+                print(f"  [{i}] temp download dir removed")
 
-    # --- Description ---
-    if description:
-        (output_path / "description.txt").write_text(description)
+        # --- Validate ---
+        print("  validating combined dataset...")
+        if has_train:
+            validate_split(output_path, "train")
+        if has_val:
+            validate_split(output_path, "val")
 
-    # --- W&B ---
-    if register_wandb:
-        print("\nRegistering in Weights & Biases...")
-        register_in_wandb(
-            output_dir=output_path,
-            description=description,
-            dataset_dirs=local_dirs,
-            classes=classes,
-            wandb_refs=wandb_refs,
-            wandb_entity=wandb_entity,
-            wandb_collection=wandb_collection,
-            wandb_org=wandb_org,
-        )
+        # --- Write combined dataset.yaml ---
+        combined: dict = {"path": ".", "names": classes}
+        if has_train:
+            combined["train"] = "./images/train/"
+        if has_val:
+            combined["val"] = "./images/val/"
+
+        yaml_path = output_path / "dataset.yaml"
+        with open(yaml_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(combined, f, default_flow_style=False, allow_unicode=True)
+
+        print(f"\nCombined dataset written → {output_dir}")
+        if has_train:
+            n_train = len(list((output_path / "images" / "train").iterdir()))
+            print(f"  train images : {n_train}")
+        if has_val:
+            n_val = len(list((output_path / "images" / "val").iterdir()))
+            print(f"  val images   : {n_val}")
+        print(f"  classes      : {names_as_list(classes)}")
+        print(f"\nTrain with: python train.py --data {yaml_path}")
+
+        # --- Description ---
+        if description:
+            (output_path / "description.txt").write_text(description)
+
+        # --- W&B ---
+        if run is not None:
+            print("\nRegistering in Weights & Biases...")
+            metadata = {"datasets": datasets, "classes": names_as_list(classes)}
+            run.config.update(metadata)
+            log_dataset(run, output_path, wandb_collection, description, metadata, wandb_org)
 
     print("\nDone.")
 
