@@ -6,7 +6,7 @@ Steps:
 2. (Optional) Subsample to a target annotated/background ratio; omit to use all samples.
 3. Split into train/val, put all samples in one split, or use existing split tags.
 4. Apply a class-mapping YAML (unmapped labels are dropped).
-5. (Optional) Redirect filepaths to 16-bit PNG images.
+5. (Optional) Redirect filepaths to 16-bit PNG images, keeping the 8-bit image when no 16-bit file exists.
 6. Export in YOLOv5 format.
 7. (Optional) Upload dataset, label-distribution plot, class map, and
    parameters to the W&B Dataset Registry.
@@ -351,10 +351,14 @@ def export_dataset(cfg: ExportConfig) -> None:
         if fo.dataset_exists(tmp_name):
             fo.delete_dataset(tmp_name)
         export = export.clone(tmp_name)
-        filepaths = [
-            fp.replace("8Bit", "16Bit").replace("jpg", "png")
-            for fp in export.values("filepath")
-        ]
+        filepaths, n_fallback = [], 0
+        for fp in export.values("filepath"):
+            fp16 = fp.replace("8Bit", "16Bit").replace("jpg", "png")
+            if fp16 != fp and not Path(fp16).exists():
+                fp16 = fp
+                n_fallback += 1
+            filepaths.append(fp16)
+        LOGGER.info(f"  {n_fallback} of {len(filepaths)} images have no 16-bit file, keeping the 8-bit one")
         export.set_values("filepath", filepaths)
 
     # --- Export ---
