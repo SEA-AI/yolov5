@@ -52,8 +52,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 from fiftyone import ViewField as F
-from utils.dataset_utils import log_dataset, validate_split
-
+from utils.dataset_utils import log_dataset, resolve_filepaths, validate_split
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -351,15 +350,7 @@ def export_dataset(cfg: ExportConfig) -> None:
         if fo.dataset_exists(tmp_name):
             fo.delete_dataset(tmp_name)
         export = export.clone(tmp_name)
-        filepaths, n_rewritten, n_fallback = [], 0, 0
-        for fp in export.values("filepath"):
-            fp16 = fp.replace("8Bit", "16Bit").replace("jpg", "png")
-            if fp16 != fp:
-                n_rewritten += 1
-                if not Path(fp16).exists():
-                    fp16 = fp
-                    n_fallback += 1
-            filepaths.append(fp16)
+        filepaths, n_rewritten, n_fallback = resolve_filepaths(export.values("filepath"))
         LOGGER.info(f"  {n_fallback} of {n_rewritten} rewritten paths have no 16-bit file, keeping the 8-bit one")
         export.set_values("filepath", filepaths)
 
