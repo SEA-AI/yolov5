@@ -50,3 +50,21 @@ def log_dataset(run, folder: Path, name: str, description: str, metadata: dict, 
             f"  artifact version already linked to registry collection '{wandb_org}/{name}' "
             f"(content unchanged since last upload — no new version created)"
         )
+
+
+def resolve_filepaths(filepaths: list[str]) -> tuple[list[str], int, int]:
+    """Map 8-bit image paths to 16-bit PNG paths, keeping the 8-bit path when the 16-bit file does not exist.
+
+    Returns the paths to export, the number of paths the rewrite changed, and how many of those fell back.
+    Paths without ``8Bit`` or ``jpg`` (e.g. Watchkeeper thermal) are not rewritten and are returned as they are.
+    """
+    resolved, n_rewritten, n_fallback = [], 0, 0
+    for fp in filepaths:
+        fp16 = fp.replace("8Bit", "16Bit").replace("jpg", "png")
+        if fp16 != fp:
+            n_rewritten += 1
+            if not Path(fp16).exists():
+                fp16 = fp
+                n_fallback += 1
+        resolved.append(fp16)
+    return resolved, n_rewritten, n_fallback
