@@ -166,9 +166,10 @@ def test_pre_albumentations_crops_to_size():
         assert ((out[:, 1:] >= 0) & (out[:, 1:] <= 1)).all()
 
 
-def test_pre_albumentations_drops_zero_size_boxes():
+@pytest.mark.parametrize("w, h", [(0.2, 0.0), (0.0, 0.2)])
+def test_pre_albumentations_drops_zero_size_boxes(w, h):
     aug = PreAlbumentations(size=32, hyp={"pre_crop": 1.0})
-    labels = np.array([[3, 0.5, 0.5, 0.2, 0.0], [1, 0.5, 0.5, 0.4, 0.4]], dtype=np.float32)  # first box has zero height
+    labels = np.array([[3, 0.5, 0.5, w, h], [1, 0.5, 0.5, 0.4, 0.4]], dtype=np.float32)  # first box has zero size
     for _ in range(10):
         im, out = aug(coded_image(64, 96), labels.copy())
         assert im.shape == (32, 32, 3)
