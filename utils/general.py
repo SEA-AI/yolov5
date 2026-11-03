@@ -910,10 +910,10 @@ def imread(filename, flags=cv2.IMREAD_COLOR):
     return cv2.imdecode(np.fromfile(filename, np.uint8), flags)
 
 
-def imwrite(filename, img):
+def imwrite(filename, img, params=None):
     """Writes an image to a file, returns True on success and False on failure, supports multilanguage paths."""
     try:
-        cv2.imencode(Path(filename).suffix, img)[1].tofile(filename)
+        cv2.imencode(Path(filename).suffix, img, params or [])[1].tofile(filename)
         return True
     except Exception:
         return False
