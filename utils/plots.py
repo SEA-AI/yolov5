@@ -113,7 +113,7 @@ def plot_images(images, targets, paths=None, fname="images.jpg", names=None):
                 if labels or conf[j] > 0.25:  # 0.25 conf thresh
                     label = f"{cls}" if labels else f"{cls} {conf[j]:.1f}"
                     annotator.box_label(box, label, color=color)
-    cv2.imwrite(str(fname), annotator.result()[..., ::-1])  # save, RGB to BGR
+    cv2.imwrite(str(fname), annotator.result()[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, 75])  # save, RGB to BGR
 
 
 def plot_val_study(file="", dir="", x=None):
