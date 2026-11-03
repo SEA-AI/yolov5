@@ -76,7 +76,10 @@ class PreAlbumentations(Albumentations):
                 Ax.SafeRandomCrop(p=hyp.get("pre_crop", 0.0) if hyp else 0.0, height=size, width=size),
             ]  # transforms
             self.transform = A.Compose(
-                T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"], clip=True)
+                T,
+                bbox_params=A.BboxParams(
+                    format="yolo", label_fields=["class_labels"], clip=True, filter_invalid_bboxes=True
+                ),
             )
 
             LOGGER.info(prefix + ", ".join(f"{x}".replace("always_apply=False, ", "") for x in T if x.p))
