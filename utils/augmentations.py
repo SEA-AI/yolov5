@@ -76,7 +76,10 @@ class PreAlbumentations(Albumentations):
                 Ax.SafeRandomCrop(p=hyp.get("pre_crop", 0.0) if hyp else 0.0, height=size, width=size),
             ]  # transforms
             self.transform = A.Compose(
-                T, bbox_params=A.BboxParams(format="yolo", label_fields=["class_labels"], clip=True)
+                T,
+                bbox_params=A.BboxParams(
+                    format="yolo", label_fields=["class_labels"], clip=True, filter_invalid_bboxes=True
+                ),
             )
 
             LOGGER.info(prefix + ", ".join(f"{x}".replace("always_apply=False, ", "") for x in T if x.p))
@@ -143,7 +146,16 @@ def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleF
 
 
 def random_perspective(
-    im, targets=(), segments=(), degrees=10, translate=0.1, scale=0.1, shear=10, perspective=0.0, border=(0, 0), fill=114
+    im,
+    targets=(),
+    segments=(),
+    degrees=10,
+    translate=0.1,
+    scale=0.1,
+    shear=10,
+    perspective=0.0,
+    border=(0, 0),
+    fill=114,
 ):
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(0.1, 0.1), scale=(0.9, 1.1), shear=(-10, 10))
     # targets = [cls, xyxy]
