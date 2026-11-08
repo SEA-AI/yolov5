@@ -32,7 +32,7 @@ try:
     assert hasattr(wandb, "__version__")  # verify package import not local dir
     if parse(wandb.__version__) >= parse("0.12.2") and RANK in {0, -1}:
         try:
-            wandb_login_success = wandb.login(timeout=30)
+            wandb_login_success = wandb.run or wandb.login(timeout=30)  # wandb>=0.24 login() is False after init()
         except wandb.errors.UsageError:  # known non-TTY terminal issue
             wandb_login_success = False
         if not wandb_login_success:
